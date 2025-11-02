@@ -22,34 +22,71 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
+void MPIChecker::checkPrematureBufferOverwrite(SVal Loc, const Stmt *S,
+                                               CheckerContext &C) const {
+  const MemRegion *ModifiedRegion = Loc.getAsRegion();
+  ProgramStateRef State = C.getState();
+
+  // For every currently known Request...
+  for (const auto &Req : State->get<RequestMap>()) {
+    const Request &R = Req.second;
+
+    // ... check if the request is in the sending phase ...
+    if (R.CurrentState == Request::State::Wait) {
+      continue;
+    }
+
+    // ... and if nothing is null.
+    if (!R.Buffer_MR || !ModifiedRegion) {
+      continue;
+    }
+
+    // Get the base region to deal with pointer indirections ...
+    const MemRegion *ModifiedBaseRegion = ModifiedRegion->getBaseRegion();
+    const MemRegion *BufferBaseRegion = R.Buffer_MR->getBaseRegion();
+
+    // ... and check if the modified region is the buffer region or a subregion of it.
+    if (ModifiedBaseRegion == BufferBaseRegion || ModifiedBaseRegion->isSubRegionOf(BufferBaseRegion)) {
+      // If that's the case, we have an error :)
+      const ExplodedNode *ErrNode = C.generateNonFatalErrorNode();
+      BReporter.reportPrematureBufferReuse(S, ErrNode, C.getBugReporter() );
+    }
+  }
+}
+
+
 void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
                                         CheckerContext &Ctx) const {
   if (!FuncClassifier->isNonBlockingType(PreCallEvent.getCalleeIdentifier())) {
     return;
   }
-  const MemRegion *const MR =
+  const MemRegion *const Request_MR =
       PreCallEvent.getArgSVal(PreCallEvent.getNumArgs() - 1).getAsRegion();
-  if (!MR)
+  if (!Request_MR)
     return;
-  const ElementRegion *const ER = dyn_cast<ElementRegion>(MR);
+  const ElementRegion *const Request_ER = dyn_cast<ElementRegion>(Request_MR);
 
   // The region must be typed, in order to reason about it.
-  if (!isa<TypedRegion>(MR) || (ER && !isa<TypedRegion>(ER->getSuperRegion())))
+  if (!isa<TypedRegion>(Request_MR) || (Request_ER && !isa<TypedRegion>(Request_ER->getSuperRegion())))
     return;
 
   ProgramStateRef State = Ctx.getState();
-  const Request *const Req = State->get<RequestMap>(MR);
-
+  const Request *const Req = State->get<RequestMap>(Request_MR);
   // double nonblocking detected
   if (Req && Req->CurrentState == Request::State::Nonblocking) {
     ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode();
-    BReporter.reportDoubleNonblocking(PreCallEvent, *Req, MR, ErrorNode,
+    BReporter.reportDoubleNonblocking(PreCallEvent, *Req, Request_MR, ErrorNode,
                                       Ctx.getBugReporter());
     Ctx.addTransition(ErrorNode->getState(), ErrorNode);
   }
   // no error
   else {
-    State = State->set<RequestMap>(MR, Request::State::Nonblocking);
+    // Get the MemRegion of the send buffer.
+    const MemRegion *const Buffer_MR = PreCallEvent.getArgSVal(0).getAsRegion();
+    // Store it on the request.
+    Request New_Req(Request::State::Nonblocking, Buffer_MR);
+
+    State = State->set<RequestMap>(Request_MR, New_Req);
     Ctx.addTransition(State);
   }
 }
@@ -78,7 +115,6 @@ void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
   // Check all request regions used by the wait function.
   for (const auto &ReqRegion : ReqRegions) {
     const Request *const Req = State->get<RequestMap>(ReqRegion);
-    State = State->set<RequestMap>(ReqRegion, Request::State::Wait);
     if (!Req) {
       if (!ErrorNode) {
         ErrorNode = Ctx.generateNonFatalErrorNode(State);
@@ -87,6 +123,10 @@ void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
       // A wait has no matching nonblocking call.
       BReporter.reportUnmatchedWait(PreCallEvent, ReqRegion, ErrorNode,
                                     Ctx.getBugReporter());
+    } else {
+      // TODO: Does this introduce some bug?
+      Request New_Req(Request::State::Wait, Req->Buffer_MR);
+      State = State->set<RequestMap>(ReqRegion, New_Req);
     }
   }
 

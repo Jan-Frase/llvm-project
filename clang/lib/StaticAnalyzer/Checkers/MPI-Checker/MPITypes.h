@@ -28,7 +28,7 @@ class Request {
 public:
   enum State : unsigned char { Nonblocking, Wait };
 
-  Request(State S) : CurrentState{S} {}
+  Request(State S, MemRegion const *const Buffer_MR) : CurrentState{S}, Buffer_MR {Buffer_MR} {};
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(CurrentState);
@@ -39,6 +39,9 @@ public:
   }
 
   const State CurrentState;
+  // This stores which MemRegion this Request is sending / receiving.
+  // It's needed to check if the buffer gets overwritten before sending finishes.
+  const MemRegion *const Buffer_MR;
 };
 
 // The RequestMap stores MPI requests which are identified by their memory

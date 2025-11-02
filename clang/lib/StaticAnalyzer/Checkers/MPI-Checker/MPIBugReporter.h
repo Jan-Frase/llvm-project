@@ -26,9 +26,19 @@ namespace mpi {
 class MPIBugReporter {
 public:
   MPIBugReporter(const CheckerBase &CB)
-      : UnmatchedWaitBugType(&CB, "Unmatched wait", MPIError),
+      : PrematureBufferReuseType(&CB, "Premature buffer reuse", MPIError),
+        UnmatchedWaitBugType(&CB, "Unmatched wait", MPIError),
         MissingWaitBugType(&CB, "Missing wait", MPIError),
         DoubleNonblockingBugType(&CB, "Double nonblocking", MPIError) {}
+
+  /// Report premature buffer reuse.
+  ///
+  /// \param S statement that changed the buffer
+  /// \param ExplNode node in the graph the bug appeared at
+  /// \param BReporter bug reporter for current context
+  void reportPrematureBufferReuse(const Stmt *S,
+                               const ExplodedNode *const ExplNode,
+                              BugReporter &BReporter) const;
 
   /// Report duplicate request use by nonblocking calls without intermediate
   /// wait.
@@ -68,6 +78,7 @@ public:
 
 private:
   const llvm::StringLiteral MPIError = "MPI Error";
+  const BugType PrematureBufferReuseType;
   const BugType UnmatchedWaitBugType;
   const BugType MissingWaitBugType;
   const BugType DoubleNonblockingBugType;

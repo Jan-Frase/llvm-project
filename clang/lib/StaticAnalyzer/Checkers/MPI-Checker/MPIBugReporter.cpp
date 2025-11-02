@@ -19,15 +19,27 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
+void MPIBugReporter::reportPrematureBufferReuse(const Stmt *S,
+                             const ExplodedNode *const ExplNode,
+                            BugReporter &BReporter) const {
+  std::string ErrorText = "Premature buffer reuse.";
+
+  auto Report = std::make_unique<PathSensitiveBugReport>(
+      PrematureBufferReuseType, ErrorText, ExplNode);
+
+  Report->addRange(S->getSourceRange());
+
+  BReporter.emitReport(std::move(Report));
+}
+
 void MPIBugReporter::reportDoubleNonblocking(
     const CallEvent &MPICallEvent, const ento::mpi::Request &Req,
     const MemRegion *const RequestRegion,
     const ExplodedNode *const ExplNode,
     BugReporter &BReporter) const {
 
-  std::string ErrorText;
-  ErrorText = "Double nonblocking on request " +
-              RequestRegion->getDescriptiveName() + ". ";
+  std::string ErrorText = "Double nonblocking on request " +
+                          RequestRegion->getDescriptiveName() + ". ";
 
   auto Report = std::make_unique<PathSensitiveBugReport>(
       DoubleNonblockingBugType, ErrorText, ExplNode);

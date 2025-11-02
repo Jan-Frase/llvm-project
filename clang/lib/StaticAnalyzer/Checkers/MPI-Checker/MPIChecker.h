@@ -27,9 +27,14 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
-class MPIChecker : public Checker<check::PreCall, check::DeadSymbols> {
+class MPIChecker : public Checker<check::PreCall, check::DeadSymbols, check::Bind> {
 public:
   MPIChecker() : BReporter(*this) {}
+
+  void checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit,
+                 CheckerContext &C) const {
+    checkPrematureBufferOverwrite(Loc, S, C);
+  }
 
   // path-sensitive callbacks
   void checkPreCall(const CallEvent &CE, CheckerContext &Ctx) const {
@@ -49,6 +54,10 @@ public:
     const_cast<std::unique_ptr<MPIFunctionClassifier> &>(FuncClassifier)
         .reset(new MPIFunctionClassifier{Ctx.getASTContext()});
   }
+
+  /// Checks if a buffer is overwritten before reaching a wait.
+  void checkPrematureBufferOverwrite(SVal Loc, const Stmt *S,
+                 CheckerContext &C) const;
 
   /// Checks if a request is used by nonblocking calls multiple times
   /// in sequence without intermediate wait. The check contains a guard,
