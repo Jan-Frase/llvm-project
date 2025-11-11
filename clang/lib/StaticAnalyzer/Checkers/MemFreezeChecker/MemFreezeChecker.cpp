@@ -4,11 +4,9 @@
 
 #include "MemFreezeChecker.h"
 
-#include "../../../../../build/tools/clang/include/clang/AST/Attrs.inc"
 #include "../../../CodeGen/ABIInfoImpl.h"
 #include "MemFreezeMap.h"
 
-#include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
 
@@ -30,6 +28,7 @@ void MemFreezeChecker::checkPreCall(const CallEvent &Call, CheckerContext &C) co
 
   // ... or the MemUnfreezeAttr.
   if (const auto *UnfreezeAttr = FD->getAttr<MemUnfreezeAttr>()) {
+    checkUnmatchedUnfreeze(Call, C, UnfreezeAttr);
   }
 }
 
@@ -80,8 +79,25 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
 }
 
 void MemFreezeChecker::checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
-                         CheckerContext &Ctx) const {
+                         CheckerContext &Ctx, const MemUnfreezeAttr *UnfreezeAttr) const {
+  const SVal OpRefSVal = PreCallEvent.getArgSVal(UnfreezeAttr->getOperationReference());
+  const MemRegion *OpRefRegion = OpRefSVal.getAsRegion();
 
+  const AsyncOperation *ExistingAO = Ctx.getState()->get<AsyncOperationMap>(OpRefRegion);
+  const bool isAOMissing = ExistingAO == nullptr;
+
+  const AsyncOperation AO(AsyncOperation::State::Unfrozen, isAOMissing ? nullptr : ExistingAO->BufferRegion);
+  ProgramStateRef State = Ctx.getState()->set<AsyncOperationMap>(OpRefRegion, AO);
+
+  // If we have arrived at an unfreeze call but nothing is frozen -> Error.
+  if (isAOMissing) {
+    ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode(State);
+    BReporter.reportUnmatchedWait(PreCallEvent, OpRefRegion, ErrorNode, Ctx.getBugReporter());
+    Ctx.addTransition(ErrorNode->getState(), ErrorNode);
+    return;
+  }
+
+  Ctx.addTransition(State);
 }
 
 void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,

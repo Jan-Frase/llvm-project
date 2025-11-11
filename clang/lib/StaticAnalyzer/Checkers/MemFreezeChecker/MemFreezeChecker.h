@@ -42,7 +42,7 @@ private:
   /// before.
   ///
   void checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
-                           CheckerContext &Ctx) const;
+                           CheckerContext &Ctx, const MemUnfreezeAttr *UnfreezeAttr) const;
 
   /// Check if a nonblocking call is not matched by a wait.
   /// If a memory region is not alive and the last function using the

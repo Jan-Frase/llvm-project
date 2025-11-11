@@ -67,6 +67,7 @@ add_clang_library(clangStaticAnalyzerCheckers
   MIGChecker.cpp
   MoveChecker.cpp
   MemFreezeChecker/MemFreezeChecker.cpp
+  MemFreezeChecker/MemFreezeBugReporter.cpp
   MPI-Checker/MPIBugReporter.cpp
   MPI-Checker/MPIChecker.cpp
   MPI-Checker/MPIFunctionClassifier.cpp
