@@ -32,8 +32,8 @@ void MemFreezeChecker::checkPreCall(const CallEvent &Call, CheckerContext &C) co
   }
 }
 
-void MemFreezeChecker::checkDeadSymbols(SymbolReaper &SR, CheckerContext &C) const {
-
+void MemFreezeChecker::checkDeadSymbols(SymbolReaper &SymReaper, CheckerContext &Ctx) const {
+  checkMissingUnfreeze(SymReaper, Ctx);
 }
 
 void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const {
@@ -102,7 +102,34 @@ void MemFreezeChecker::checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
 
 void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,
                        CheckerContext &Ctx) const {
+  ProgramStateRef State = Ctx.getState();
+  const auto &Requests = State->get<AsyncOperationMap>();
+  if (Requests.isEmpty())
+    return;
 
+  ExplodedNode *ErrorNode{nullptr};
+
+  for (const auto &Req : Requests) {
+    if (!SymReaper.isLiveRegion(Req.first)) {
+      if (Req.second.CurrentState == AsyncOperation::State::Frozen) {
+
+        if (!ErrorNode) {
+          ErrorNode = Ctx.generateNonFatalErrorNode(State);
+          State = ErrorNode->getState();
+        }
+        BReporter.reportMissingWait(Req.second, Req.first, ErrorNode,
+                                    Ctx.getBugReporter());
+      }
+      State = State->remove<AsyncOperationMap>(Req.first);
+    }
+  }
+
+  // Transition to update the state regarding removed requests.
+  if (!ErrorNode) {
+    Ctx.addTransition(State);
+  } else {
+    Ctx.addTransition(State, ErrorNode);
+  }
 }
 
 void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S, CheckerContext &C) const {
