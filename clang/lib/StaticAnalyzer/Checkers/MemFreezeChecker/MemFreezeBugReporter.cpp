@@ -9,6 +9,18 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 
+void MemFreezeBugReporter::reportUnsafeBufferUse(
+    const Stmt *S, const ExplodedNode *const ExplNode,
+    BugReporter &BReporter) const {
+  std::string ErrorText = "Premature buffer reuse.";
+
+  auto Report = std::make_unique<PathSensitiveBugReport>(
+      UnsafeBufferUseBugType, ErrorText, ExplNode);
+
+  Report->addRange(S->getSourceRange());
+  BReporter.emitReport(std::move(Report));
+}
+
 void MemFreezeBugReporter::reportDoubleNonblocking(
     const CallEvent &MPICallEvent, const AsyncOperation &AO,
     const MemRegion *const RequestRegion,

@@ -37,7 +37,7 @@ void MemFreezeChecker::checkDeadSymbols(SymbolReaper &SymReaper, CheckerContext 
 }
 
 void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const {
-
+  checkUnsafeBufferWrite(Loc, S, C);
 }
 
 /*
@@ -132,11 +132,41 @@ void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,
   }
 }
 
-void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S, CheckerContext &C) const {
+void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S,
+                                              CheckerContext &C) const {
+  const MemRegion *ModifiedRegion = Loc.getAsRegion();
+  ProgramStateRef State = C.getState();
 
+  // For every currently known Request...
+  for (const auto &Req : State->get<AsyncOperationMap>()) {
+    const AsyncOperation &R = Req.second;
+
+    // ... check if the request is in the sending phase ...
+    if (R.CurrentState == AsyncOperation::State::Unfrozen) {
+      continue;
+    }
+
+    // ... and if nothing is null.
+    if (!R.BufferRegion|| !ModifiedRegion) {
+      continue;
+    }
+
+    // Get the base region to deal with pointer indirections ...
+    const MemRegion *ModifiedBaseRegion = ModifiedRegion->getBaseRegion();
+    const MemRegion *BufferBaseRegion = R.BufferRegion->getBaseRegion();
+
+    // ... and check if the modified region is the buffer region or a subregion
+    // of it.
+    if (ModifiedBaseRegion == BufferBaseRegion ||
+        ModifiedBaseRegion->isSubRegionOf(BufferBaseRegion)) {
+      // If that's the case, we have an error :)
+      const ExplodedNode *ErrNode = C.generateNonFatalErrorNode();
+      BReporter.reportUnsafeBufferUse(S, ErrNode, C.getBugReporter());
+    }
+  }
 }
 
-}
+} // namespace memfreeze
 
 // Registers my checker.
 void registerMemFreezeChecker(CheckerManager &mgr) {
