@@ -5309,3 +5309,18 @@ def NonString : InheritableAttr {
   let Subjects = SubjectList<[Var, Field]>;
   let Documentation = [NonStringDocs];
 }
+
+def MemFreeze : InheritableAttr {
+  let Spellings = [GCC<"mem_freeze">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [IntArgument<"Buffer">, IntArgument<"OperationReference">];
+  let Documentation = [Undocumented];
+}
+
+// TODO: Add a list version? If needed. Maybe i can check that dynamically?
+def MemUnfreeze : InheritableAttr {
+  let Spellings = [GCC<"mem_unfreeze">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [IntArgument<"OperationReference">];
+  let Documentation = [Undocumented];
+}

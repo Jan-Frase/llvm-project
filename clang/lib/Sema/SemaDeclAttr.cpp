@@ -6911,6 +6911,24 @@ static void handleVTablePointerAuthentication(Sema &S, Decl *D,
       CustomDiscriminationValue));
 }
 
+static void handleMemFreeze(Sema &S, Decl *D, const ParsedAttr &AL) {
+  auto buffer_arg = AL.getArgAsExpr(0);
+  auto operation_reference_arg = AL.getArgAsExpr(1);
+
+  auto buffer_value = buffer_arg->getIntegerConstantExpr(S.Context).value().getExtValue();
+  auto operation_reference_value = operation_reference_arg->getIntegerConstantExpr(S.Context).value().getExtValue();
+
+  D->addAttr(::new (S.Context) MemFreezeAttr(S.Context, AL, buffer_value, operation_reference_value));
+}
+
+static void handleMemUnfreeze(Sema &S, Decl *D, const ParsedAttr &AL) {
+  auto operation_reference_arg = AL.getArgAsExpr(0);
+
+  auto operation_reference_value = operation_reference_arg->getIntegerConstantExpr(S.Context).value().getExtValue();
+
+  D->addAttr(::new (S.Context) MemUnfreezeAttr(S.Context, AL, operation_reference_value));
+}
+
 //===----------------------------------------------------------------------===//
 // Top Level Sema Entry Points
 //===----------------------------------------------------------------------===//
@@ -7844,6 +7862,13 @@ ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D, const ParsedAttr &AL,
 
   case ParsedAttr::AT_VTablePointerAuthentication:
     handleVTablePointerAuthentication(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_MemFreeze:
+    handleMemFreeze(S, D, AL);
+    break;
+  case ParsedAttr::AT_MemUnfreeze:
+    handleMemUnfreeze(S, D, AL);
     break;
   }
 }
