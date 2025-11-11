@@ -4,8 +4,9 @@
 
 #ifndef LLVM_MEMFREEZECHECKER_H
 #define LLVM_MEMFREEZECHECKER_H
+#include "MemFreezeBugReporter.h"
+
 #include "clang/StaticAnalyzer/Core/Checker.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/ProgramStateTrait.h"
 
 namespace clang {
 namespace ento {
@@ -14,6 +15,7 @@ class MemFreezeChecker
     : public Checker<check::PreCall, check::DeadSymbols, check::Bind> {
 
 public:
+  MemFreezeChecker() : BReporter(*this) {}
   /*
    * ---> Checker entry points <---
    */
@@ -34,7 +36,7 @@ private:
   /// in sequence without an intermediate wait.
   ///
   void checkDoubleFreeze(const CallEvent &PreCallEvent,
-                              CheckerContext &Ctx) const;
+                              CheckerContext &Ctx, const MemFreezeAttr *FreezeAttr) const;
 
   /// Checks if the request used by the wait function was not used at all
   /// before.
@@ -51,6 +53,8 @@ private:
   /// Check if a memory region was written to before a matching wait call was reached.
   /// TODO: What about reads?
   void checkUnsafeBufferWrite(SVal Loc, const Stmt *S, CheckerContext &C) const;
+
+  MemFreezeBugReporter BReporter;
 };
 
 } // namespace memfreeze

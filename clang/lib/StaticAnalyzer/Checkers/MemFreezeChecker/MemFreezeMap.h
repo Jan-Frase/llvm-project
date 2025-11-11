@@ -12,16 +12,21 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 
+// This represents something like Request in MPI.
+// So some sort of object that manages a non-blocking operation.
+// It keeps track of the state of the operation and the relevant memory.
 class AsyncOperation {
 public:
   enum State : unsigned char { Frozen, Unfrozen };
 
   AsyncOperation(State S, const MemRegion *BufferRegion) : CurrentState{S}, BufferRegion {BufferRegion} {}
 
+  // TODO: Can this be deleted?
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(CurrentState);
   }
 
+  // TODO: Delete?
   bool operator==(const AsyncOperation &ToCompare) const {
     return CurrentState == ToCompare.CurrentState;
   }
@@ -30,6 +35,7 @@ public:
   const MemRegion *BufferRegion;
 };
 
+// Add a map to the State.
 struct AsyncOperationMap {};
 typedef llvm::ImmutableMap<const MemRegion *,
                            AsyncOperation>
