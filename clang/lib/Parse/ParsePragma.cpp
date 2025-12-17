@@ -31,6 +31,12 @@ using namespace clang;
 
 namespace {
 
+struct MemFreezeHandler: public PragmaHandler {
+  explicit MemFreezeHandler() : PragmaHandler("mem_freeze") {}
+  void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
+                    Token &FirstToken) override;
+};
+
 struct PragmaAlignHandler : public PragmaHandler {
   explicit PragmaAlignHandler() : PragmaHandler("align") {}
   void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
