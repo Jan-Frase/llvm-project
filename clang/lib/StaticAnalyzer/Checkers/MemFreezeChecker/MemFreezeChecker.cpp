@@ -16,19 +16,23 @@ namespace memfreeze {
 /*
  * ---> Checker entry points <---
  */
-
 void MemFreezeChecker::checkPreCall(const CallEvent &Call, CheckerContext &C) const {
+  // Get the function declaration...
+  const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
+
+  // ... or the MemUnfreezeAttr.
+  if (const auto *UnfreezeAttr = FD->getAttr<MemUnfreezeAttr>()) {
+    checkUnmatchedUnfreeze(Call, C, UnfreezeAttr);
+  }
+}
+
+void MemFreezeChecker::checkPostCall(const CallEvent &Call, CheckerContext &C) const {
   // Get the function declaration...
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
 
   // ... check if it has the MemFreezeAttr ...
   if (const auto *FreezeAttr = FD->getAttr<MemFreezeAttr>()) {
     checkDoubleFreeze(Call, C, FreezeAttr);
-  }
-
-  // ... or the MemUnfreezeAttr.
-  if (const auto *UnfreezeAttr = FD->getAttr<MemUnfreezeAttr>()) {
-    checkUnmatchedUnfreeze(Call, C, UnfreezeAttr);
   }
 }
 
@@ -66,8 +70,7 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
   // If we are, and it's already frozen, it's an error!
   if (ExistingAO && ExistingAO->CurrentState == AsyncOperation::State::Frozen) {
     ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode();
-    // BReporter.reportDoubleNonblocking(PreCallEvent, *ExistingAO, OpRefRegion, ErrorNode, Ctx.getBugReporter());
-    llvm::errs() << "Double nonblocking!\n";
+    BReporter.reportDoubleNonblocking(PreCallEvent, *ExistingAO, OpRefRegion, ErrorNode, Ctx.getBugReporter());
     Ctx.addTransition(ErrorNode->getState(), ErrorNode);
     return;
   }

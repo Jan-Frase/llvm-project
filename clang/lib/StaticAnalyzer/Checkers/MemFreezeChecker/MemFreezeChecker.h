@@ -12,7 +12,7 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 class MemFreezeChecker
-    : public Checker<check::PreCall, check::DeadSymbols, check::Bind> {
+    : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
 
 public:
   MemFreezeChecker() : BReporter(*this) {}
@@ -21,6 +21,8 @@ public:
    */
 
   void checkPreCall(const CallEvent &Call, CheckerContext &C) const;
+
+  void checkPostCall(const CallEvent &Call, CheckerContext &C) const;
 
   void checkDeadSymbols(SymbolReaper &SR, CheckerContext &C) const;
 
