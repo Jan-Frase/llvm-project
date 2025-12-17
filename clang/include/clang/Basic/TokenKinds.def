@@ -1037,6 +1037,10 @@ ANNOTATION(repl_input_end)
 // Annotation for #embed
 ANNOTATION(embed)
 
+// Annotation for async buffer access checker
+ANNOTATION(mem_freeze)
+ANNOTATION(mem_unfreeze)
+
 #undef PRAGMA_ANNOTATION
 #undef ANNOTATION
 #undef TESTING_KEYWORD
