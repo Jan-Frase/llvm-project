@@ -1,0 +1,14 @@
+[
+    {
+        "arguments": [
+            "c++",
+            "-c",
+            "-o",
+            "builds/clear_error.out",
+            "-I/usr/include/openmpi-x86_64",
+            "clear_error.cpp"
+        ],
+        "directory": "/home/jan/Code/BA-Thesis/playground/01-All_Errors",
+        "file": "clear_error.cpp"
+    }
+]
