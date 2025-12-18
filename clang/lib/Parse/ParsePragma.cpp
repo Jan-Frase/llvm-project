@@ -33,8 +33,96 @@ namespace {
 
 struct MemFreezeHandler: public PragmaHandler {
   explicit MemFreezeHandler() : PragmaHandler("mem_freeze") {}
+
   void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
-                    Token &FirstToken) override;
+                    Token &FirstToken) override {
+    llvm::errs() << "handling mem_freeze pragma \n";
+
+    Token Tok;
+
+    while (Tok.isNot(tok::eod)) {
+      PP.Lex(Tok);
+      // We expect an identifier.
+      if (!Tok.is(tok::identifier)) {
+        PP.Diag(Tok.getLocation(), diag::warn_pragma_expected_identifier)
+          << "mem_freeze";
+        return;
+      }
+
+      llvm::errs() << "found identifier: " << Tok.getIdentifierInfo()->getName() << "\n";
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::l_paren)) {
+        llvm::errs() << "expected lparen\n";
+        return;
+      }
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::numeric_constant)) {
+        llvm::errs() << "expected numeric constant\n";
+        return;
+      }
+      llvm::errs() << PP.getSpelling(Tok) << "\n";
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::comma)) {
+        llvm::errs() << "expected comma\n";
+        return;
+      }
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::numeric_constant)) {
+        llvm::errs() << "expected numeric constant\n";
+        return;
+      }
+      llvm::errs() << PP.getSpelling(Tok) << "\n";
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::r_paren)) {
+        llvm::errs() << "expected rparen\n";
+        return;
+      }
+    }
+  }
+};
+
+struct MemUnfreezeHandler: public PragmaHandler {
+  explicit MemUnfreezeHandler() : PragmaHandler("mem_unfreeze") {}
+
+  void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
+                    Token &FirstToken) override {
+    llvm::errs() << "handling mem_unfreeze pragma \n";
+
+    Token Tok;
+
+    while (Tok.isNot(tok::eod)) {
+      PP.Lex(Tok);
+      if (!Tok.is(tok::identifier)) {
+        llvm::errs() << "expected identifier\n";
+        return;
+      }
+
+      llvm::errs() << "found identifier: " << Tok.getIdentifierInfo()->getName() << "\n";
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::l_paren)) {
+        llvm::errs() << "expected lparen\n";
+        return;
+      }
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::numeric_constant)) {
+        llvm::errs() << "expected numeric constant\n";
+        return;
+      }
+      llvm::errs() << PP.getSpelling(Tok) << "\n";
+
+      PP.Lex(Tok);
+      if (!Tok.is(tok::r_paren)) {
+        llvm::errs() << "expected rparen\n";
+        return;
+      }
+  }
 };
 
 struct PragmaAlignHandler : public PragmaHandler {
@@ -418,6 +506,11 @@ void markAsReinjectedForRelexing(llvm::MutableArrayRef<clang::Token> Toks) {
 }  // end namespace
 
 void Parser::initializePragmaHandlers() {
+  FreezeHandler = std::make_unique<MemFreezeHandler>();
+  PP.AddPragmaHandler(FreezeHandler.get());
+  UnfreezeHandler = std::make_unique<MemUnfreezeHandler>();
+  PP.AddPragmaHandler(UnfreezeHandler.get());
+
   AlignHandler = std::make_unique<PragmaAlignHandler>();
   PP.AddPragmaHandler(AlignHandler.get());
 

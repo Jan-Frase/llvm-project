@@ -7003,6 +7003,8 @@ public:
   ///@{
 
 private:
+  std::unique_ptr<PragmaHandler> FreezeHandler;
+  std::unique_ptr<PragmaHandler> UnfreezeHandler;
   std::unique_ptr<PragmaHandler> AlignHandler;
   std::unique_ptr<PragmaHandler> GCCVisibilityHandler;
   std::unique_ptr<PragmaHandler> OptionsHandler;
