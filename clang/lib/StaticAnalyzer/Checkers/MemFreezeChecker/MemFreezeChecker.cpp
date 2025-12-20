@@ -9,6 +9,23 @@
 
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
+#include "llvm/Support/YAMLTraits.h"
+
+
+namespace llvm {
+namespace yaml {
+
+
+template <> struct MappingTraits<clang::ento::memfreeze::Freezer> {
+  static void mapping(IO &io, clang::ento::memfreeze::Freezer &freezer) {
+    io.mapRequired("name", freezer.name);
+    io.mapRequired("buffer_idx", freezer.buffer_idx);
+    io.mapRequired("request_idx", freezer.request_idx);
+  }
+};
+
+}
+}
 
 namespace clang {
 namespace ento {
@@ -171,9 +188,34 @@ void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S,
 
 } // namespace memfreeze
 
+
 // Registers my checker.
 void registerMemFreezeChecker(CheckerManager &mgr) {
-  mgr.registerChecker<memfreeze::MemFreezeChecker>();
+  const auto *const checker = mgr.registerChecker<memfreeze::MemFreezeChecker>();
+
+  const AnalyzerOptions & options = mgr.getAnalyzerOptions();
+  const auto path_to_yaml= options.getCheckerStringOption(checker, "Config");
+
+  if (path_to_yaml.size() == 0) {
+    mgr.reportInvalidCheckerOptionValue(checker, "Config", "must be set");
+  }
+  // TODO: For now i will load the file here. Ideally it would get loaded once.
+  llvm::errs() << "MemFreezeChecker registered with path to yaml: " << path_to_yaml << "\n";
+
+  auto Buffer = llvm::MemoryBuffer::getFile(path_to_yaml);
+  if (!Buffer) {
+    llvm::errs() << "Could not load yaml file: " << path_to_yaml << "\n";
+  }
+
+  memfreeze::Freezer freezer;
+  llvm::yaml::Input input(Buffer.get()->getBuffer());
+  input >> freezer;
+
+  if (input.error()) {
+    llvm::errs() << "Invalid yaml.";
+  }
+
+  llvm::errs() << freezer.buffer_idx << "\n";
 }
 
 bool shouldRegisterMemFreezeChecker(const CheckerManager &mgr) {

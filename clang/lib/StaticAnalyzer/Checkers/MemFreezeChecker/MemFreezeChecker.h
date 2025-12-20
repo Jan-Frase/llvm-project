@@ -11,6 +11,13 @@
 namespace clang {
 namespace ento {
 namespace memfreeze {
+
+struct Freezer {
+  std::string name;
+  int buffer_idx;
+  int request_idx;
+};
+
 class MemFreezeChecker
     : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
 

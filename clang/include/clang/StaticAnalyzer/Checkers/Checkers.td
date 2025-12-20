@@ -1259,7 +1259,15 @@ let ParentPackage = MemFreeze in {
 
 def MemFreezeChecker : Checker<"MemFreeze">,
   HelpText<"Checks that memory is not altered before waiting for relevant async calls to finish.">,
-  Documentation<NotDocumented>;
+  Documentation<NotDocumented>,
+
+  CheckerOptions<[
+    CmdLineOption<String,
+                  "Config",
+                  "Specifies the path of the configuration file.",
+                  "",
+                  Released>
+  ]>;
 }
 
 let ParentPackage = MPI in {
