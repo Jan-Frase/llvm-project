@@ -18,6 +18,16 @@ struct Freezer {
   int request_idx;
 };
 
+struct Unfreezer {
+  std::string name;
+  int request_idx;
+};
+
+struct Doc {
+  std::vector<Freezer> freezers;
+  std::vector<Unfreezer> unfreezers;
+};
+
 class MemFreezeChecker
     : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
 

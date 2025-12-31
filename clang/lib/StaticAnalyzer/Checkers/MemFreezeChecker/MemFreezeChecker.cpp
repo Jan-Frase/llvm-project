@@ -9,6 +9,7 @@
 
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
+#include "llvm/BinaryFormat/MsgPackDocument.h"
 #include "llvm/Support/YAMLTraits.h"
 
 
@@ -24,8 +25,47 @@ template <> struct MappingTraits<clang::ento::memfreeze::Freezer> {
   }
 };
 
-}
-}
+template <> struct SequenceTraits<std::vector<clang::ento::memfreeze::Freezer>> {
+
+  static size_t size(IO &IO, std::vector<clang::ento::memfreeze::Freezer> &A) { return A.size(); }
+
+  static clang::ento::memfreeze::Freezer &element(IO &IO, std::vector<clang::ento::memfreeze::Freezer> &A, size_t Index) {
+    if (Index >= A.size()) {
+      A.resize(Index + 1);
+    }
+    return A[Index];
+  }
+};
+
+template <> struct MappingTraits<clang::ento::memfreeze::Unfreezer> {
+  static void mapping(IO &io, clang::ento::memfreeze::Unfreezer &unfreezer) {
+    io.mapRequired("name", unfreezer.name);
+    io.mapRequired("request_idx", unfreezer.request_idx);
+  }
+};
+
+template <> struct SequenceTraits<std::vector<clang::ento::memfreeze::Unfreezer>> {
+
+  static size_t size(IO &IO, std::vector<clang::ento::memfreeze::Unfreezer> &A) { return A.size(); }
+
+  static clang::ento::memfreeze::Unfreezer &element(IO &IO, std::vector<clang::ento::memfreeze::Unfreezer> &A, size_t Index) {
+    if (Index >= A.size()) {
+      A.resize(Index + 1);
+    }
+    return A[Index];
+  }
+};
+
+template <> struct MappingTraits<clang::ento::memfreeze::Doc> {
+  static void mapping(IO &io, clang::ento::memfreeze::Doc &doc) {
+    io.mapRequired("freezers", doc.freezers);
+    io.mapRequired("unfreezers", doc.unfreezers);
+  }
+};
+
+
+} // namespace yaml
+} // namespace llvm
 
 namespace clang {
 namespace ento {
@@ -207,15 +247,24 @@ void registerMemFreezeChecker(CheckerManager &mgr) {
     llvm::errs() << "Could not load yaml file: " << path_to_yaml << "\n";
   }
 
-  memfreeze::Freezer freezer;
+  memfreeze::Doc doc;
   llvm::yaml::Input input(Buffer.get()->getBuffer());
-  input >> freezer;
+  input >> doc;
 
   if (input.error()) {
     llvm::errs() << "Invalid yaml.";
   }
 
-  llvm::errs() << freezer.buffer_idx << "\n";
+  for (const auto &freezer : doc.freezers) {
+    llvm::errs() << freezer.name << "\n";
+    llvm::errs() << freezer.buffer_idx << "\n";
+    llvm::errs() << freezer.request_idx << "\n";
+  }
+
+  for (const auto &unfreezer : doc.unfreezers) {
+    llvm::errs() << unfreezer.name << "\n";
+    llvm::errs() << unfreezer.request_idx << "\n";
+  }
 }
 
 bool shouldRegisterMemFreezeChecker(const CheckerManager &mgr) {
