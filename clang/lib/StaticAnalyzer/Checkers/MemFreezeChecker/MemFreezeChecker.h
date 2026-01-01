@@ -71,7 +71,7 @@ private:
 
   /// Check if a memory region was written to before a matching wait call was reached.
   /// TODO: What about reads?
-  void checkUnsafeBufferWrite(SVal Loc, const Stmt *S, CheckerContext &C) const;
+  void checkUnsafeBufferAccess(SVal Loc, const Stmt *S, CheckerContext &C) const;
 
   MemFreezeBugReporter BReporter;
 };

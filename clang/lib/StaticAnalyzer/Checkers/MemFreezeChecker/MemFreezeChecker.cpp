@@ -4,6 +4,7 @@
 
 #include "MemFreezeChecker.h"
 
+#include "../../../../../llvm/lib/CodeGen/AsmPrinter/DwarfDebug.h"
 #include "../../../CodeGen/ABIInfoImpl.h"
 #include "MemFreezeMap.h"
 
@@ -77,6 +78,8 @@ void MemFreezeChecker::checkPreCall(const CallEvent &Call, CheckerContext &C) co
   // Get the function declaration...
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
 
+  // llvm::errs() << FD->getName().data() << "\n";
+
   // ... or the MemUnfreezeAttr.
   for (const auto &[name, request_idx] : doc.unfreezers) {
     if (FD->getName().compare(name) == 0) {
@@ -102,7 +105,7 @@ void MemFreezeChecker::checkDeadSymbols(SymbolReaper &SymReaper, CheckerContext 
 }
 
 void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const {
-  checkUnsafeBufferWrite(Loc, S, C);
+  checkUnsafeBufferAccess(Loc, S, C);
 }
 
 /*
@@ -122,10 +125,8 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
     return;
   }
 
-  const MemRegion *BufferRegion = BufferSVal.getAsRegion();
-  const MemRegion *OpRefRegion = OpRefSval.getAsRegion();
-
   // Check if we are already aware of this operation.
+  const MemRegion *OpRefRegion = OpRefSval.getAsRegion();
   const AsyncOperation *ExistingAO = Ctx.getState()->get<AsyncOperationMap>(OpRefRegion);
 
   // If we are, and it's already frozen, it's an error!
@@ -137,6 +138,24 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
   }
 
   // If everything is fine, add the newly found operation.
+  auto BufferRegion = BufferSVal.getAs<Loc>().value().getAsRegion();
+  // If what is being send is some kind of array, struct etc - go up one region
+  switch (BufferRegion->getKind()) {
+    case MemRegion::ElementRegionKind:
+    case MemRegion::FieldRegionKind:
+    case MemRegion::ObjCIvarRegionKind:
+    case MemRegion::CXXBaseObjectRegionKind:
+    case MemRegion::CXXDerivedObjectRegionKind:
+      BufferRegion = cast<SubRegion>(BufferRegion)->getSuperRegion();
+      break;
+    default:
+      break;
+  }
+
+  llvm::errs() << "Found new freeze operation!\n";
+  BufferRegion->dumpToStream(llvm::errs());
+  llvm::errs() << "\n";
+
   const AsyncOperation AO(AsyncOperation::State::Frozen, BufferRegion);
   ProgramStateRef State = Ctx.getState()->set<AsyncOperationMap>(OpRefRegion, AO);
   Ctx.addTransition(State);
@@ -196,38 +215,42 @@ void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,
   }
 }
 
-void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S,
+void MemFreezeChecker::checkUnsafeBufferAccess(SVal Loc, const Stmt *S,
                                               CheckerContext &C) const {
-  const MemRegion *ModifiedRegion = Loc.getAsRegion();
   ProgramStateRef State = C.getState();
 
+  // 1. Takes care of writes.
+  const MemRegion *ModifiedRegion = Loc.getAsRegion();
   // For every currently known Request...
   for (const auto &Req : State->get<AsyncOperationMap>()) {
     const AsyncOperation &R = Req.second;
 
     // ... check if the request is in the sending phase ...
-    if (R.CurrentState == AsyncOperation::State::Unfrozen) {
+    if (R.CurrentState != AsyncOperation::State::Frozen) {
       continue;
     }
 
-    // ... and if nothing is null.
+    // ... and if nothing is null ...
     if (!R.BufferRegion|| !ModifiedRegion) {
       continue;
     }
 
-    // Get the base region to deal with pointer indirections ...
-    const MemRegion *ModifiedBaseRegion = ModifiedRegion->getBaseRegion();
-    const MemRegion *BufferBaseRegion = R.BufferRegion->getBaseRegion();
+    llvm::errs() << "ModifiedRegion: ";
+    ModifiedRegion->dumpToStream(llvm::errs());
+    llvm::errs() << "BufferRegion: ";
+    R.BufferRegion->dumpToStream(llvm::errs());
 
-    // ... and check if the modified region is the buffer region or a subregion
-    // of it.
-    if (ModifiedBaseRegion == BufferBaseRegion ||
-        ModifiedBaseRegion->isSubRegionOf(BufferBaseRegion)) {
+    // ... check if the modified region is the buffer region or a subregion of it.
+    if (ModifiedRegion->isSubRegionOf(R.BufferRegion)) {
       // If that's the case, we have an error :)
       const ExplodedNode *ErrNode = C.generateNonFatalErrorNode();
       BReporter.reportUnsafeBufferUse(S, ErrNode, C.getBugReporter());
     }
   }
+
+  // 2. Takes care of reads.
+
+  // TODO: Add state transition?
 }
 
 } // namespace memfreeze

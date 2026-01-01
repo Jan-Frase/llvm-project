@@ -64,6 +64,7 @@ for dir in dirs:
         print()
         print("------------------------------")
         print("Now testing: ", file_name)
+        print(" ".join(ANALYZER_COMMAND))
         result = subprocess.run(ANALYZER_COMMAND, capture_output=True, text=True)
 
         if result.returncode == 1:
