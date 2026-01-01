@@ -7,7 +7,7 @@ void i_send_memory(int* buf, int* has_finished) {
 }
 
 __attribute__((mem_unfreeze(0)))
-void i_wait_for_send(int* has_finished) {
+void i_wait(int* has_finished) {
   int y = 4;
 }
 
@@ -19,7 +19,7 @@ int main(int argc, char *argv[]) {
 
   // do some work in the mean time 
   
-  i_wait_for_send(&has_finished);
+  i_wait(&has_finished);
 
   free(buf);
 

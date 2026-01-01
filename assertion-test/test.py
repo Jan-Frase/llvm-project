@@ -4,26 +4,31 @@ import os
 SHOW_WARNINGS = True
 
 ANALYZER_COMMAND = [
-    "/home/jan/BA-Thesis/BA-Code/llvm-project/build/bin/clang",
-    "--analyze",
-    "-Xclang",
-    "-analyzer-checker=optin.memfreeze.MemFreeze",
+    "/home/jan/bachelor/llvm-project/build/bin/clang",
     "-I/usr/include/mpich-x86_64",
     # "--output=html",
     # "-L/usr/lib64/mpich/lib",
     # "-Wl,-rpath",
-    # "-Wl,/usr/lib64/mpich/lib", 
+    # "-Wl,/usr/lib64/mpich/lib",
     # "-Wl,--enable-new-dtags",
     # "-lmpi",
+    "--analyze",
+    "-Xclang",
+    "-analyzer-checker=optin.memfreeze.MemFreeze",
+    "-Xanalyzer",
+    "-analyzer-config",
+    "-Xanalyzer",
+    "",
     "",
 ]
 
-TEST_FILES_ROOT = "/home/jan/BA-Thesis/BA-Code/assertion-tests/"
+TEST_FILES_ROOT = "/home/jan/bachelor/llvm-project/assertion-test/"
 
 dirs = os.listdir(TEST_FILES_ROOT)
 dirs.sort()
 
 print(dirs)
+did_everything_pass = True
 
 for dir in dirs:
     dir_path = os.path.join(TEST_FILES_ROOT, dir)
@@ -37,8 +42,7 @@ for dir in dirs:
     all_files_in_dir = os.listdir(dir_path) 
     all_files_in_dir.sort()
 
-    did_everything_pass = True
-    for file_name in all_files_in_dir: 
+    for file_name in all_files_in_dir:
         if not file_name.endswith(".c"):
             continue
 
@@ -51,6 +55,8 @@ for dir in dirs:
             should_emit_warning = True
         if file_name.startswith("unmatched_unfreeze"):
             should_emit_warning = True
+
+        ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 2] = f"optin.memfreeze.MemFreeze:Config=./{dir}/config.yaml"
 
         total_file_name = dir_path + "/" + file_name
         ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 1] = total_file_name
@@ -82,12 +88,12 @@ for dir in dirs:
             did_everything_pass = False
             print("-> Oh no :(")
 
-# print("Quick clean up :)")
-        # for file in os.listdir(TEST_FILES_ROOT):
-            #    if file.endswith(".plist"):
-# os.remove(TEST_FILES_ROOT + file)
+print("Quick clean up :)")
+for file in os.listdir(TEST_FILES_ROOT):
+    if file.endswith(".plist"):
+        os.remove(TEST_FILES_ROOT + file)
 
-    if did_everything_pass:
-        print("ALL GOOD!")
-    else:
-        print("something went wrong")
+if did_everything_pass:
+    print("ALL GOOD!")
+else:
+    print("something went wrong")

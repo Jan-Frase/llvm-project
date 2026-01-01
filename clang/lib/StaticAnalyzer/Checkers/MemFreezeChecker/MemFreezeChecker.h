@@ -28,11 +28,10 @@ struct Doc {
   std::vector<Unfreezer> unfreezers;
 };
 
-class MemFreezeChecker
-    : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
+class MemFreezeChecker final : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
 
 public:
-  MemFreezeChecker() : BReporter(*this) {}
+  explicit MemFreezeChecker() : BReporter(*this) {}
   /*
    * ---> Checker entry points <---
    */
@@ -45,6 +44,7 @@ public:
 
   void checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const;
 
+  Doc doc;
   /*
    * ---> Various functions <---
    */
@@ -55,13 +55,13 @@ private:
   /// in sequence without an intermediate wait.
   ///
   void checkDoubleFreeze(const CallEvent &PreCallEvent,
-                              CheckerContext &Ctx, const MemFreezeAttr *FreezeAttr) const;
+                              CheckerContext &Ctx, const int buffer_idx, const int request_idx) const;
 
   /// Checks if the request used by the wait function was not used at all
   /// before.
   ///
   void checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
-                           CheckerContext &Ctx, const MemUnfreezeAttr *UnfreezeAttr) const;
+                           CheckerContext &Ctx, const int request_idx) const;
 
   /// Check if a nonblocking call is not matched by a wait.
   /// If a memory region is not alive and the last function using the

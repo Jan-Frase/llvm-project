@@ -1,7 +1,7 @@
 #include <stdlib.h>
 
 __attribute__((mem_unfreeze(0)))
-void i_wait_for_operation_to_finish(int* has_finished) {
+void i_wait(int* has_finished) {
   *has_finished = 1;
 }
 
@@ -17,7 +17,7 @@ void i_send_memory(int* buf_1, int* has_finished_1, int* has_finished_2) {
   i_run_a_long_calculation(buf_1, has_finished_2);
 
   buf_1[31] = 666;
-  i_wait_for_operation_to_finish(has_finished_2);
+  i_wait(has_finished_2);
 }
 
 int main(int argc, char *argv[]) {
@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
 
   // do some work in the mean time 
   
-  i_wait_for_operation_to_finish(&has_finished_1);
+  i_wait(&has_finished_1);
 
   free(buf_1);
 

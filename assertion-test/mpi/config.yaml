@@ -1,0 +1,11 @@
+freezers:
+- name: MPI_Isend
+  buffer_idx: 0
+  request_idx: 6
+- name: MPI_Irecv
+  buffer_idx: 0
+  request_idx: 6
+
+unfreezers:
+ - name: MPI_Wait
+   request_idx: 0

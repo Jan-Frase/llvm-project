@@ -78,8 +78,10 @@ void MemFreezeChecker::checkPreCall(const CallEvent &Call, CheckerContext &C) co
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
 
   // ... or the MemUnfreezeAttr.
-  if (const auto *UnfreezeAttr = FD->getAttr<MemUnfreezeAttr>()) {
-    checkUnmatchedUnfreeze(Call, C, UnfreezeAttr);
+  for (const auto &[name, request_idx] : doc.unfreezers) {
+    if (FD->getName().compare(name) == 0) {
+      checkUnmatchedUnfreeze(Call, C, request_idx);
+    }
   }
 }
 
@@ -88,8 +90,10 @@ void MemFreezeChecker::checkPostCall(const CallEvent &Call, CheckerContext &C) c
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
 
   // ... check if it has the MemFreezeAttr ...
-  if (const auto *FreezeAttr = FD->getAttr<MemFreezeAttr>()) {
-    checkDoubleFreeze(Call, C, FreezeAttr);
+  for (const auto &[name, buffer_idx, request_idx] : doc.freezers) {
+    if (FD->getName().compare(name) == 0) {
+      checkDoubleFreeze(Call, C, buffer_idx, request_idx);
+    }
   }
 }
 
@@ -107,10 +111,10 @@ void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclI
 
 
 void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
-                            CheckerContext &Ctx, const MemFreezeAttr *FreezeAttr) const {
+                            CheckerContext &Ctx, const int buffer_idx, const int request_idx) const {
   // Get the Buffer and OperationReference according to the annotation.
-  const SVal BufferSVal = PreCallEvent.getArgSVal(FreezeAttr->getBuffer());
-  const SVal OpRefSval = PreCallEvent.getArgSVal(FreezeAttr->getOperationReference());
+  const SVal BufferSVal = PreCallEvent.getArgSVal(buffer_idx);
+  const SVal OpRefSval = PreCallEvent.getArgSVal(request_idx);
 
   // If they aren't defined, the annotation must be faulty.
   if (BufferSVal.isUndef() || OpRefSval.isUndef()) {
@@ -139,8 +143,8 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
 }
 
 void MemFreezeChecker::checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
-                         CheckerContext &Ctx, const MemUnfreezeAttr *UnfreezeAttr) const {
-  const SVal OpRefSVal = PreCallEvent.getArgSVal(UnfreezeAttr->getOperationReference());
+                         CheckerContext &Ctx, const int request_idx) const {
+  const SVal OpRefSVal = PreCallEvent.getArgSVal(request_idx);
   const MemRegion *OpRefRegion = OpRefSVal.getAsRegion();
 
   const AsyncOperation *ExistingAO = Ctx.getState()->get<AsyncOperationMap>(OpRefRegion);
@@ -231,7 +235,7 @@ void MemFreezeChecker::checkUnsafeBufferWrite(SVal Loc, const Stmt *S,
 
 // Registers my checker.
 void registerMemFreezeChecker(CheckerManager &mgr) {
-  const auto *const checker = mgr.registerChecker<memfreeze::MemFreezeChecker>();
+  auto *const checker = mgr.registerChecker<memfreeze::MemFreezeChecker>();
 
   const AnalyzerOptions & options = mgr.getAnalyzerOptions();
   const auto path_to_yaml= options.getCheckerStringOption(checker, "Config");
@@ -243,7 +247,7 @@ void registerMemFreezeChecker(CheckerManager &mgr) {
   llvm::errs() << "MemFreezeChecker registered with path to yaml: " << path_to_yaml << "\n";
 
   auto Buffer = llvm::MemoryBuffer::getFile(path_to_yaml);
-  if (!Buffer) {
+  if (!Buffer || Buffer.getError().value() != 0) {
     llvm::errs() << "Could not load yaml file: " << path_to_yaml << "\n";
   }
 
@@ -255,16 +259,7 @@ void registerMemFreezeChecker(CheckerManager &mgr) {
     llvm::errs() << "Invalid yaml.";
   }
 
-  for (const auto &freezer : doc.freezers) {
-    llvm::errs() << freezer.name << "\n";
-    llvm::errs() << freezer.buffer_idx << "\n";
-    llvm::errs() << freezer.request_idx << "\n";
-  }
-
-  for (const auto &unfreezer : doc.unfreezers) {
-    llvm::errs() << unfreezer.name << "\n";
-    llvm::errs() << unfreezer.request_idx << "\n";
-  }
+  checker->doc = doc;
 }
 
 bool shouldRegisterMemFreezeChecker(const CheckerManager &mgr) {
