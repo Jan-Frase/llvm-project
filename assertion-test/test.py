@@ -56,6 +56,7 @@ for dir in dirs:
         if file_name.startswith("unmatched_unfreeze"):
             should_emit_warning = True
 
+
         ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 2] = f"optin.memfreeze.MemFreeze:Config=./{dir}/config.yaml"
 
         total_file_name = dir_path + "/" + file_name
@@ -67,20 +68,23 @@ for dir in dirs:
         print(" ".join(ANALYZER_COMMAND))
         result = subprocess.run(ANALYZER_COMMAND, capture_output=True, text=True)
 
+        print("Should emit warning: ", should_emit_warning)
+
         if result.returncode == 1:
             print("Clang crashed!")
 
         did_emit_warning = False
-        if file_name.startswith("buffer-write"):
+        if "buffer-write" in file_name:
            did_emit_warning = "Premature buffer reuse" in result.stderr
-        if file_name.startswith("double-freeze"):
+        if "double-freeze" in file_name:
             did_emit_warning = "Double nonblocking" in result.stderr
-        if file_name.startswith("missing-unfreeze"):
+        if "missing-unfreeze" in file_name:
             did_emit_warning = "has no matching wait" in result.stderr
-        if file_name.startswith("unmatched_unfreeze"):
+        if "unmatched_unfreeze" in file_name:
             did_emit_warning = "has no matching nonblocking" in result.stderr
 
         if SHOW_WARNINGS:
+            print()
             print(result.stderr)
 
         if should_emit_warning == did_emit_warning:

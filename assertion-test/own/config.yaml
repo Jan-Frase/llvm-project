@@ -1,10 +1,12 @@
-freezers:
+read_write_freezers:
 - name: i_send_memory
   buffer_idx: 0
   request_idx: 1
 - name: i_run_a_long_calculation
   buffer_idx: 0
   request_idx: 1
+
+write_freezers:
 
 unfreezers:
  - name: i_wait

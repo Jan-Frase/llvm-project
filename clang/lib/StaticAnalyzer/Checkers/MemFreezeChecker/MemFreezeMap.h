@@ -12,13 +12,12 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 
+enum State : unsigned char { Read_Write_Frozen, Write_Frozen, Unfrozen };
 // This represents something like Request in MPI.
 // So some sort of object that manages a non-blocking operation.
 // It keeps track of the state of the operation and the relevant memory.
 class AsyncOperation {
 public:
-  enum State : unsigned char { Frozen, Unfrozen };
-
   AsyncOperation(State S, const MemRegion *BufferRegion) : CurrentState{S}, BufferRegion {BufferRegion} {}
 
   // TODO: Can this be deleted?

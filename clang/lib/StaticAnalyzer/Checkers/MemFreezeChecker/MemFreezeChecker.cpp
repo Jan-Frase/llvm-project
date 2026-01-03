@@ -59,8 +59,9 @@ template <> struct SequenceTraits<std::vector<clang::ento::memfreeze::Unfreezer>
 
 template <> struct MappingTraits<clang::ento::memfreeze::Doc> {
   static void mapping(IO &io, clang::ento::memfreeze::Doc &doc) {
-    io.mapRequired("freezers", doc.freezers);
-    io.mapRequired("unfreezers", doc.unfreezers);
+    io.mapOptional("read_write_freezers", doc.read_write_freezers);
+    io.mapOptional("write_freezers", doc.write_freezers);
+    io.mapOptional("unfreezers", doc.unfreezers);
   }
 };
 
@@ -92,10 +93,17 @@ void MemFreezeChecker::checkPostCall(const CallEvent &Call, CheckerContext &C) c
   // Get the function declaration...
   const FunctionDecl *FD = dyn_cast<FunctionDecl>(Call.getDecl());
 
-  // ... check if it has the MemFreezeAttr ...
-  for (const auto &[name, buffer_idx, request_idx] : doc.freezers) {
+  // ... check if its full-freezer ...
+  for (const auto &[name, buffer_idx, request_idx] : doc.read_write_freezers) {
     if (FD->getName().compare(name) == 0) {
-      checkDoubleFreeze(Call, C, buffer_idx, request_idx);
+      checkDoubleFreeze(Call, C, buffer_idx, request_idx, Read_Write_Frozen);
+    }
+  }
+
+  // ... or a write-freezer.
+  for (const auto &[name, buffer_idx, request_idx] : doc.write_freezers) {
+    if (FD->getName().compare(name) == 0) {
+      checkDoubleFreeze(Call, C, buffer_idx, request_idx, Write_Frozen);
     }
   }
 }
@@ -104,8 +112,9 @@ void MemFreezeChecker::checkDeadSymbols(SymbolReaper &SymReaper, CheckerContext 
   checkMissingUnfreeze(SymReaper, Ctx);
 }
 
-void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const {
-  checkUnsafeBufferAccess(Loc, S, C);
+// TODO: Use checkLocation instead lol.
+void MemFreezeChecker::checkLocation(SVal Loc, bool IsLoad, const Stmt *S, CheckerContext &C) const {
+  checkUnsafeBufferAccess(Loc, S, C, IsLoad);
 }
 
 /*
@@ -114,7 +123,7 @@ void MemFreezeChecker::checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclI
 
 
 void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
-                            CheckerContext &Ctx, const int buffer_idx, const int request_idx) const {
+                            CheckerContext &Ctx, const int buffer_idx, const int request_idx, State freeze_state) const {
   // Get the Buffer and OperationReference according to the annotation.
   const SVal BufferSVal = PreCallEvent.getArgSVal(buffer_idx);
   const SVal OpRefSval = PreCallEvent.getArgSVal(request_idx);
@@ -130,7 +139,7 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
   const AsyncOperation *ExistingAO = Ctx.getState()->get<AsyncOperationMap>(OpRefRegion);
 
   // If we are, and it's already frozen, it's an error!
-  if (ExistingAO && ExistingAO->CurrentState == AsyncOperation::State::Frozen) {
+  if (ExistingAO && ExistingAO->CurrentState != Unfrozen) {
     ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode();
     BReporter.reportDoubleNonblocking(PreCallEvent, *ExistingAO, OpRefRegion, ErrorNode, Ctx.getBugReporter());
     Ctx.addTransition(ErrorNode->getState(), ErrorNode);
@@ -156,7 +165,7 @@ void MemFreezeChecker::checkDoubleFreeze(const CallEvent &PreCallEvent,
   BufferRegion->dumpToStream(llvm::errs());
   llvm::errs() << "\n";
 
-  const AsyncOperation AO(AsyncOperation::State::Frozen, BufferRegion);
+  const AsyncOperation AO(freeze_state, BufferRegion);
   ProgramStateRef State = Ctx.getState()->set<AsyncOperationMap>(OpRefRegion, AO);
   Ctx.addTransition(State);
 }
@@ -169,7 +178,7 @@ void MemFreezeChecker::checkUnmatchedUnfreeze(const CallEvent &PreCallEvent,
   const AsyncOperation *ExistingAO = Ctx.getState()->get<AsyncOperationMap>(OpRefRegion);
   const bool isAOMissing = ExistingAO == nullptr;
 
-  const AsyncOperation AO(AsyncOperation::State::Unfrozen, isAOMissing ? nullptr : ExistingAO->BufferRegion);
+  const AsyncOperation AO(Unfrozen, isAOMissing ? nullptr : ExistingAO->BufferRegion);
   ProgramStateRef State = Ctx.getState()->set<AsyncOperationMap>(OpRefRegion, AO);
 
   // If we have arrived at an unfreeze call but nothing is frozen -> Error.
@@ -192,18 +201,18 @@ void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,
 
   ExplodedNode *ErrorNode{nullptr};
 
-  for (const auto &Req : Requests) {
-    if (!SymReaper.isLiveRegion(Req.first)) {
-      if (Req.second.CurrentState == AsyncOperation::State::Frozen) {
+  for (const auto &[mem_region, async_op] : Requests) {
+    if (!SymReaper.isLiveRegion(mem_region)) {
+      if (async_op.CurrentState != Unfrozen) {
 
         if (!ErrorNode) {
           ErrorNode = Ctx.generateNonFatalErrorNode(State);
           State = ErrorNode->getState();
         }
-        BReporter.reportMissingWait(Req.second, Req.first, ErrorNode,
+        BReporter.reportMissingWait(async_op, mem_region, ErrorNode,
                                     Ctx.getBugReporter());
       }
-      State = State->remove<AsyncOperationMap>(Req.first);
+      State = State->remove<AsyncOperationMap>(mem_region);
     }
   }
 
@@ -216,43 +225,42 @@ void MemFreezeChecker::checkMissingUnfreeze(SymbolReaper &SymReaper,
 }
 
 void MemFreezeChecker::checkUnsafeBufferAccess(SVal Loc, const Stmt *S,
-                                              CheckerContext &C) const {
+                                              CheckerContext &C, bool IsLoad) const {
   ProgramStateRef State = C.getState();
 
   // 1. Takes care of writes.
   const MemRegion *ModifiedRegion = Loc.getAsRegion();
   // For every currently known Request...
-  for (const auto &Req : State->get<AsyncOperationMap>()) {
-    const AsyncOperation &R = Req.second;
+  for (const auto &[_, async_op] : State->get<AsyncOperationMap>()) {
+    // ... if the request is in the sending phase -> no error ...
+    if (async_op.CurrentState == Unfrozen) {
+      continue;
+    }
 
-    // ... check if the request is in the sending phase ...
-    if (R.CurrentState != AsyncOperation::State::Frozen) {
+    // ... if it's a read in a write-frozen buffer -> no error ...
+    if (IsLoad && async_op.CurrentState == Write_Frozen) {
       continue;
     }
 
     // ... and if nothing is null ...
-    if (!R.BufferRegion|| !ModifiedRegion) {
+    if (!async_op.BufferRegion|| !ModifiedRegion) {
       continue;
     }
 
     llvm::errs() << "ModifiedRegion: ";
     ModifiedRegion->dumpToStream(llvm::errs());
     llvm::errs() << "BufferRegion: ";
-    R.BufferRegion->dumpToStream(llvm::errs());
+    async_op.BufferRegion->dumpToStream(llvm::errs());
 
     // ... check if the modified region is the buffer region or a subregion of it.
-    if (ModifiedRegion->isSubRegionOf(R.BufferRegion)) {
+    if (ModifiedRegion->isSubRegionOf(async_op.BufferRegion)) {
       // If that's the case, we have an error :)
       const ExplodedNode *ErrNode = C.generateNonFatalErrorNode();
       BReporter.reportUnsafeBufferUse(S, ErrNode, C.getBugReporter());
     }
   }
-
-  // 2. Takes care of reads.
-
   // TODO: Add state transition?
 }
-
 } // namespace memfreeze
 
 

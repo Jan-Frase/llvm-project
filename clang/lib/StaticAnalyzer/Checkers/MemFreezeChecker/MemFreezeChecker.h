@@ -24,11 +24,12 @@ struct Unfreezer {
 };
 
 struct Doc {
-  std::vector<Freezer> freezers;
+  std::vector<Freezer> read_write_freezers;
+  std::vector<Freezer> write_freezers;
   std::vector<Unfreezer> unfreezers;
 };
 
-class MemFreezeChecker final : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Bind> {
+class MemFreezeChecker final : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Location> {
 
 public:
   explicit MemFreezeChecker() : BReporter(*this) {}
@@ -42,7 +43,7 @@ public:
 
   void checkDeadSymbols(SymbolReaper &SR, CheckerContext &C) const;
 
-  void checkBind(SVal Loc, SVal Val, const Stmt *S, bool AtDeclInit, CheckerContext &C) const;
+  void checkLocation(SVal Loc, bool IsLoad, const Stmt *S, CheckerContext &C) const;
 
   Doc doc;
   /*
@@ -55,7 +56,7 @@ private:
   /// in sequence without an intermediate wait.
   ///
   void checkDoubleFreeze(const CallEvent &PreCallEvent,
-                              CheckerContext &Ctx, const int buffer_idx, const int request_idx) const;
+                              CheckerContext &Ctx, const int buffer_idx, const int request_idx, State freeze_state) const;
 
   /// Checks if the request used by the wait function was not used at all
   /// before.
@@ -70,8 +71,7 @@ private:
                          CheckerContext &Ctx) const;
 
   /// Check if a memory region was written to before a matching wait call was reached.
-  /// TODO: What about reads?
-  void checkUnsafeBufferAccess(SVal Loc, const Stmt *S, CheckerContext &C) const;
+  void checkUnsafeBufferAccess(SVal Loc, const Stmt *S, CheckerContext &C, bool IsLoad) const;
 
   MemFreezeBugReporter BReporter;
 };
