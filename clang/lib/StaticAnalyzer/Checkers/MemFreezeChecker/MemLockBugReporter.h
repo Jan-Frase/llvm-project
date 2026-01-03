@@ -4,17 +4,15 @@
 
 #ifndef LLVM_MEMFREEZEBUGREPORTER_H
 #define LLVM_MEMFREEZEBUGREPORTER_H
-#include "MemFreezeMap.h"
+#include "MemLockMap.h"
 
 #include "clang/StaticAnalyzer/Core/Checker.h"
 
-namespace clang {
-namespace ento {
-namespace memfreeze {
+namespace clang::ento::memfreeze {
 
-class MemFreezeBugReporter {
+class MemLockBugReporter {
 public:
-  MemFreezeBugReporter(const CheckerBase &CB)
+  MemLockBugReporter(const CheckerBase &CB)
       : UnsafeBufferUseBugType(&CB, "Unsafe buffer use", MemFreezeError),
         UnmatchedWaitBugType(&CB, "Unmatched wait", MemFreezeError),
         MissingWaitBugType(&CB, "Missing wait", MemFreezeError),
@@ -52,8 +50,6 @@ private:
   const BugType DoubleNonblockingBugType;
 };
 
-} // namespace memfreeze
-} // namespace ento
-} // namespace clang
+} // namespace clang::ento::memfreeze
 
 #endif // LLVM_MEMFREEZEBUGREPORTER_H

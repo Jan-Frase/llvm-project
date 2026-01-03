@@ -2,14 +2,14 @@
 // Created by jan on 11/11/25.
 //
 
-#include "MemFreezeBugReporter.h"
+#include "MemLockBugReporter.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CallEvent.h"
 
 namespace clang {
 namespace ento {
 namespace memfreeze {
 
-void MemFreezeBugReporter::reportUnsafeBufferUse(
+void MemLockBugReporter::reportUnsafeBufferUse(
     const Stmt *S, const ExplodedNode *const ExplNode,
     BugReporter &BReporter) const {
   std::string ErrorText = "Premature buffer reuse.";
@@ -21,7 +21,7 @@ void MemFreezeBugReporter::reportUnsafeBufferUse(
   BReporter.emitReport(std::move(Report));
 }
 
-void MemFreezeBugReporter::reportDoubleNonblocking(
+void MemLockBugReporter::reportDoubleNonblocking(
     const CallEvent &MPICallEvent, const AsyncOperation &AO,
     const MemRegion *const RequestRegion,
     const ExplodedNode *const ExplNode,
@@ -43,7 +43,7 @@ void MemFreezeBugReporter::reportDoubleNonblocking(
   BReporter.emitReport(std::move(Report));
 }
 
-void MemFreezeBugReporter::reportMissingWait(
+void MemLockBugReporter::reportMissingWait(
     const AsyncOperation &AO, const MemRegion *const RequestRegion,
     const ExplodedNode *const ExplNode,
     BugReporter &BReporter) const {
@@ -60,7 +60,7 @@ void MemFreezeBugReporter::reportMissingWait(
   BReporter.emitReport(std::move(Report));
 }
 
-void MemFreezeBugReporter::reportUnmatchedWait(
+void MemLockBugReporter::reportUnmatchedWait(
     const CallEvent &CE, const MemRegion *const RequestRegion,
     const ExplodedNode *const ExplNode,
     BugReporter &BReporter) const {

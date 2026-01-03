@@ -1,13 +1,13 @@
-read_write_freezers:
+full_locker:
 - name: i_send_memory
   buffer_idx: 0
-  request_idx: 1
+  lock_idx: 1
 - name: i_run_a_long_calculation
   buffer_idx: 0
-  request_idx: 1
+  lock_idx: 1
 
-write_freezers:
+write_locker:
 
-unfreezers:
+unlocker:
  - name: i_wait
-   request_idx: 0
+   lock_idx: 0

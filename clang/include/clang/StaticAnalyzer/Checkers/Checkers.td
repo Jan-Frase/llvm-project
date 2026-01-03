@@ -95,7 +95,7 @@ def Containers : Package<"containers">, ParentPackage<CoreFoundation>;
 def LocalizabilityAlpha : Package<"localizability">, ParentPackage<CocoaAlpha>;
 def LocalizabilityOptIn : Package<"localizability">, ParentPackage<CocoaOptIn>;
 
-def MemFreeze : Package<"memfreeze">, ParentPackage<OptIn>;
+def MemLock : Package<"memlock">, ParentPackage<OptIn>;
 def MPI : Package<"mpi">, ParentPackage<OptIn>;
 
 def LLVM : Package<"llvm">;
@@ -1255,9 +1255,9 @@ def PluralMisuseChecker : Checker<"PluralMisuseChecker">,
 
 } // end "alpha.osx.cocoa.localizability"
 
-let ParentPackage = MemFreeze in {
+let ParentPackage = MemLock in {
 
-def MemFreezeChecker : Checker<"MemFreeze">,
+def MemLockChecker : Checker<"MemLock">,
   HelpText<"Checks that memory is not altered before waiting for relevant async calls to finish.">,
   Documentation<NotDocumented>,
 

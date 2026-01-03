@@ -18,20 +18,20 @@ enum State : unsigned char { Read_Write_Frozen, Write_Frozen, Unfrozen };
 // It keeps track of the state of the operation and the relevant memory.
 class AsyncOperation {
 public:
-  AsyncOperation(State S, const MemRegion *BufferRegion) : CurrentState{S}, BufferRegion {BufferRegion} {}
+  AsyncOperation(State S, const MemRegion *BufferRegion) : current_state{S}, buffer_region {BufferRegion} {}
 
   // TODO: Can this be deleted?
   void Profile(llvm::FoldingSetNodeID &Id) const {
-    Id.AddInteger(CurrentState);
+    Id.AddInteger(current_state);
   }
 
   // TODO: Delete?
   bool operator==(const AsyncOperation &ToCompare) const {
-    return CurrentState == ToCompare.CurrentState;
+    return current_state == ToCompare.current_state;
   }
 
-  const State CurrentState;
-  const MemRegion *BufferRegion;
+  const State current_state;
+  const MemRegion *buffer_region;
 };
 
 // Add a map to the State.
@@ -39,7 +39,6 @@ struct AsyncOperationMap {};
 typedef llvm::ImmutableMap<const MemRegion *,
                            AsyncOperation>
     AsyncOperationMapImpl;
-
 }  // end of namespace: memfreeze
 
 template <>

@@ -4,7 +4,8 @@
 
 #ifndef LLVM_MEMFREEZECHECKER_H
 #define LLVM_MEMFREEZECHECKER_H
-#include "MemFreezeBugReporter.h"
+#include "MemLockBugReporter.h"
+#include "MemLockConfigHandler.h"
 
 #include "clang/StaticAnalyzer/Core/Checker.h"
 
@@ -12,44 +13,27 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 
-struct Freezer {
-  std::string name;
-  int buffer_idx;
-  int request_idx;
-};
-
-struct Unfreezer {
-  std::string name;
-  int request_idx;
-};
-
-struct Doc {
-  std::vector<Freezer> read_write_freezers;
-  std::vector<Freezer> write_freezers;
-  std::vector<Unfreezer> unfreezers;
-};
-
-class MemFreezeChecker final : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Location> {
+class MemLockChecker final : public Checker<check::PreCall, check::PostCall, check::DeadSymbols, check::Location> {
 
 public:
-  explicit MemFreezeChecker() : BReporter(*this) {}
+  explicit MemLockChecker() : bug_reporter(*this) {}
   /*
    * ---> Checker entry points <---
    */
 
-  void checkPreCall(const CallEvent &Call, CheckerContext &C) const;
+  void checkPreCall(const CallEvent &call_event, CheckerContext &context) const;
 
-  void checkPostCall(const CallEvent &Call, CheckerContext &C) const;
+  void checkPostCall(const CallEvent &Call, CheckerContext &context) const;
 
   void checkDeadSymbols(SymbolReaper &SR, CheckerContext &C) const;
 
-  void checkLocation(SVal Loc, bool IsLoad, const Stmt *S, CheckerContext &C) const;
+  void checkLocation(SVal location, bool is_load, const Stmt *statement, CheckerContext &context) const;
 
-  Doc doc;
   /*
    * ---> Various functions <---
    */
 
+  MemLockConfigHandler config_handler;
 private:
 
   /// Checks if a request is used by nonblocking calls multiple times
@@ -73,7 +57,7 @@ private:
   /// Check if a memory region was written to before a matching wait call was reached.
   void checkUnsafeBufferAccess(SVal Loc, const Stmt *S, CheckerContext &C, bool IsLoad) const;
 
-  MemFreezeBugReporter BReporter;
+  MemLockBugReporter bug_reporter;
 };
 
 } // namespace memfreeze

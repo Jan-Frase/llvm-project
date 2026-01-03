@@ -1,13 +1,13 @@
-read_write_freezers:
+full_locker:
 - name: MPI_Irecv
   buffer_idx: 0
-  request_idx: 6
+  lock_idx: 6
 
-write_freezers:
+write_locker:
   - name: MPI_Isend
     buffer_idx: 0
-    request_idx: 6
+    lock_idx: 6
 
-unfreezers:
+unlocker:
  - name: MPI_Wait
-   request_idx: 0
+   lock_idx: 0

@@ -14,7 +14,7 @@ ANALYZER_COMMAND = [
     # "-lmpi",
     "--analyze",
     "-Xclang",
-    "-analyzer-checker=optin.memfreeze.MemFreeze",
+    "-analyzer-checker=optin.memlock.MemLock",
     "-Xanalyzer",
     "-analyzer-config",
     "-Xanalyzer",
@@ -57,7 +57,7 @@ for dir in dirs:
             should_emit_warning = True
 
 
-        ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 2] = f"optin.memfreeze.MemFreeze:Config=./{dir}/config.yaml"
+        ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 2] = f"optin.memlock.MemLock:Config=./{dir}/config.yaml"
 
         total_file_name = dir_path + "/" + file_name
         ANALYZER_COMMAND[len(ANALYZER_COMMAND) - 1] = total_file_name
