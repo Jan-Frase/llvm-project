@@ -19,10 +19,14 @@ namespace memfreeze {
 // If everything is fine, it adds the locked operation to the map.
 //
 // ========================================
-void MemLockChecker::checkPostCall(const CallEvent &Call,
+void MemLockChecker::checkPostCall(const CallEvent &call,
                                    CheckerContext &context) const {
-  // Get the function declaration...
-  const StringRef fn_name= dyn_cast<FunctionDecl>(Call.getDecl())->getName();
+  // Get the function declarations name...
+  const auto a = call.getDecl();
+  if (a == nullptr) return;
+  const auto b = dyn_cast<FunctionDecl>(a);
+  if (b == nullptr) return;
+  const StringRef fn_name = b->getName();
 
   // ... check if it's name is in the list of full-freezers ...
   const auto read_write_locker_data = std::find_if(
@@ -51,7 +55,7 @@ void MemLockChecker::checkPostCall(const CallEvent &Call,
   const int lock_idx = read_write_locker_found ? read_write_locker_data->lock_idx : write_locker_data->lock_idx;
 
   // Get the lock region.
-  const auto *const lock_region = Call.getArgSVal(lock_idx).getAsRegion();
+  const auto *const lock_region = call.getArgSVal(lock_idx).getAsRegion();
 
   // Check if we are already aware of this operation.
   const AsyncOperation *old_operation =
@@ -60,7 +64,7 @@ void MemLockChecker::checkPostCall(const CallEvent &Call,
   // If we are, and it's already frozen, it's an error!
   if (old_operation && old_operation->current_state != Unfrozen) {
     ExplodedNode *error_node = context.generateNonFatalErrorNode();
-    bug_reporter.reportDoubleNonblocking(Call, *old_operation, lock_region, error_node, context.getBugReporter());
+    bug_reporter.reportDoubleNonblocking(call, *old_operation, lock_region, error_node, context.getBugReporter());
     context.addTransition(error_node->getState(), error_node);
     return;
   }
@@ -68,7 +72,7 @@ void MemLockChecker::checkPostCall(const CallEvent &Call,
   // Get buffer index.
   const int buffer_idx = read_write_locker_found ? read_write_locker_data->buffer_idx : write_locker_data->buffer_idx;
   // Get the buffer pointer, read its value (which is the location it points to) and get that location as a region.
-  const auto *buffer_region = Call.getArgSVal(buffer_idx).getAs<Loc>().value().getAsRegion();
+  const auto *buffer_region = call.getArgSVal(buffer_idx).getAs<Loc>().value().getAsRegion();
 
   // If what is being sent is some kind of array, struct etc. - go up one region
   switch (buffer_region->getKind()) {
@@ -98,7 +102,11 @@ void MemLockChecker::checkPostCall(const CallEvent &Call,
 void MemLockChecker::checkPreCall(const CallEvent &call_event,
                                   CheckerContext &context) const {
   // Get the function declarations name...
-  const StringRef fn_name = dyn_cast<FunctionDecl>(call_event.getDecl())->getName();
+  const auto a = call_event.getDecl();
+  if (a == nullptr) return;
+  const auto b = dyn_cast<FunctionDecl>(a);
+  if (b == nullptr) return;
+  const StringRef fn_name = b->getName();
 
   // ... and check if it's name is in the list of unfreezers.
   const auto unfreezer_data = std::find_if(
@@ -235,10 +243,9 @@ void registerMemLockChecker(CheckerManager &mgr) {
     mgr.reportInvalidCheckerOptionValue(checker, "Config", "must be set");
   }
   // TODO: For now i will load the file here. Ideally it would get loaded once.
-  llvm::errs() << "MemFreezeChecker loading yaml from disk: " << path_to_yaml
-               << "\n";
+  llvm::errs() << "MemLockChecker loading yaml from disk: " << path_to_yaml << "\n";
 
-  auto buffer = llvm::MemoryBuffer::getFile(path_to_yaml);
+  auto buffer = llvm::MemoryBuffer::getFile(path_to_yaml, true);
   if (!buffer || buffer.getError().value() != 0) {
     llvm::errs() << "Could not load yaml file: " << path_to_yaml << "\n";
   }

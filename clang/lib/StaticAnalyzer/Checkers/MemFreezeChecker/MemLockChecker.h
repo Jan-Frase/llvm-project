@@ -23,9 +23,9 @@ public:
 
   void checkPreCall(const CallEvent &call_event, CheckerContext &context) const;
 
-  void checkPostCall(const CallEvent &Call, CheckerContext &context) const;
+  void checkPostCall(const CallEvent &call, CheckerContext &context) const;
 
-  void checkDeadSymbols(SymbolReaper &SR, CheckerContext &C) const;
+  void checkDeadSymbols(SymbolReaper &sym_reaper, CheckerContext &context) const;
 
   void checkLocation(SVal location, bool is_load, const Stmt *statement, CheckerContext &context) const;
 
