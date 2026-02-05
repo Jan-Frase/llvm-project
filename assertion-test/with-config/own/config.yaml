@@ -1,0 +1,13 @@
+full_locker:
+- name: i_send_memory
+  buffer_idx: 0
+  lock_idx: 1
+- name: i_run_a_long_calculation
+  buffer_idx: 0
+  lock_idx: 1
+
+write_locker:
+
+unlocker:
+ - name: i_wait
+   lock_idx: 0

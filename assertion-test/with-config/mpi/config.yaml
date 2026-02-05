@@ -1,0 +1,13 @@
+full_locker:
+- name: MPI_Irecv
+  buffer_idx: 0
+  lock_idx: 6
+
+write_locker:
+  - name: MPI_Isend
+    buffer_idx: 0
+    lock_idx: 6
+
+unlocker:
+ - name: MPI_Wait
+   lock_idx: 0

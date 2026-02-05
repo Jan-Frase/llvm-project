@@ -24,21 +24,47 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
-class Request {
+class Message {
 public:
-  enum State : unsigned char { Nonblocking, Wait };
+  enum MessageState : unsigned char { FullLocked, WriteLocked, Unlocked };
 
-  Request(State S) : CurrentState{S} {}
+  Message(const MessageState MS, const SVal MessageRegion, const SVal MsgCount) : MsgState{MS}, MsgRegion {MessageRegion}, MsgCount {MsgCount} {}
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
-    Id.AddInteger(CurrentState);
+    Id.AddInteger(MsgState);
+    Id.Add(MsgRegion);
+    Id.Add(MsgCount);
+  }
+
+  bool operator==(const Message &ToCompare) const {
+    return MsgState == ToCompare.MsgState &&
+        MsgRegion == ToCompare.MsgRegion &&
+          MsgCount == ToCompare.MsgCount;
+  }
+
+  const MessageState MsgState;
+  const SVal MsgRegion;
+  const SVal MsgCount;
+};
+
+class Request {
+public:
+  enum RequestState : unsigned char { Nonblocking, Wait };
+
+  Request(const RequestState RS, const Message Msg) : RqstState{RS}, Msg{Msg} {}
+  Request(const RequestState RS) : RqstState{RS}, Msg(Message(Message::Unlocked, SVal(), SVal())) {}
+
+  void Profile(llvm::FoldingSetNodeID &Id) const {
+    Id.AddInteger(RqstState);
+    Id.Add(Msg);
   }
 
   bool operator==(const Request &ToCompare) const {
-    return CurrentState == ToCompare.CurrentState;
+    return RqstState == ToCompare.RqstState && Msg == ToCompare.Msg;
   }
 
-  const State CurrentState;
+  const RequestState RqstState;
+  const Message Msg;
 };
 
 // The RequestMap stores MPI requests which are identified by their memory

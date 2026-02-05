@@ -27,31 +27,45 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
   if (!FuncClassifier->isNonBlockingType(PreCallEvent.getCalleeIdentifier())) {
     return;
   }
-  const MemRegion *const MR =
+  const MemRegion *const RequestRegion =
       PreCallEvent.getArgSVal(PreCallEvent.getNumArgs() - 1).getAsRegion();
-  if (!MR)
+  if (!RequestRegion)
     return;
-  const ElementRegion *const ER = dyn_cast<ElementRegion>(MR);
+  const ElementRegion *const RequestElementRegion = dyn_cast<ElementRegion>(RequestRegion);
 
   // The region must be typed, in order to reason about it.
-  if (!isa<TypedRegion>(MR) || (ER && !isa<TypedRegion>(ER->getSuperRegion())))
+  if (!isa<TypedRegion>(RequestRegion) || (RequestElementRegion && !isa<TypedRegion>(RequestElementRegion->getSuperRegion())))
     return;
 
   ProgramStateRef State = Ctx.getState();
-  const Request *const Req = State->get<RequestMap>(MR);
+  const Request *const OldReq = State->get<RequestMap>(RequestRegion);
 
   // double nonblocking detected
-  if (Req && Req->CurrentState == Request::State::Nonblocking) {
+  if (OldReq && OldReq->RqstState == Request::RequestState::Nonblocking) {
     ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode();
-    BReporter.reportDoubleNonblocking(PreCallEvent, *Req, MR, ErrorNode,
+    BReporter.reportDoubleNonblocking(PreCallEvent, *OldReq, RequestRegion, ErrorNode,
                                       Ctx.getBugReporter());
     Ctx.addTransition(ErrorNode->getState(), ErrorNode);
+    return;
   }
+
   // no error
-  else {
-    State = State->set<RequestMap>(MR, Request::State::Nonblocking);
-    Ctx.addTransition(State);
-  }
+  const bool isFullLocking = FuncClassifier->isFullLocking(PreCallEvent.getCalleeIdentifier());
+  const bool isWriteLocking = FuncClassifier->isWriteLocking(PreCallEvent.getCalleeIdentifier());
+  const Message::MessageState MsgState = isFullLocking ? Message::MessageState::FullLocked: (isWriteLocking ? Message::MessageState::WriteLocked : Message::MessageState::Unlocked);
+
+  const SVal MsgRegion = PreCallEvent.getArgSVal(0);
+  const SVal MsgCount = PreCallEvent.getArgSVal(1);
+
+  const Request NewReq = MsgState == Message::MessageState::Unlocked ||
+                           MsgRegion.isUnknownOrUndef() ||
+                           MsgCount.isUnknownOrUndef()
+                       ? Request(Request::RequestState::Nonblocking)
+                       : Request(Request::RequestState::Nonblocking,
+                                 Message(MsgState, MsgRegion, MsgCount));
+
+  State = State->set<RequestMap>(RequestRegion, NewReq);
+  Ctx.addTransition(State);
 }
 
 void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
@@ -78,7 +92,7 @@ void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
   // Check all request regions used by the wait function.
   for (const auto &ReqRegion : ReqRegions) {
     const Request *const Req = State->get<RequestMap>(ReqRegion);
-    State = State->set<RequestMap>(ReqRegion, Request::State::Wait);
+    State = State->set<RequestMap>(ReqRegion, Request(Request::Wait));
     if (!Req) {
       if (!ErrorNode) {
         ErrorNode = Ctx.generateNonFatalErrorNode(State);
@@ -107,18 +121,18 @@ void MPIChecker::checkMissingWaits(SymbolReaper &SymReaper,
   ExplodedNode *ErrorNode{nullptr};
 
   auto ReqMap = State->get<RequestMap>();
-  for (const auto &Req : ReqMap) {
-    if (!SymReaper.isLiveRegion(Req.first)) {
-      if (Req.second.CurrentState == Request::State::Nonblocking) {
+  for (const auto &[ReqRegion, Req] : ReqMap) {
+    if (!SymReaper.isLiveRegion(ReqRegion)) {
+      if (Req.RqstState == Request::Nonblocking) {
 
         if (!ErrorNode) {
           ErrorNode = Ctx.generateNonFatalErrorNode(State);
           State = ErrorNode->getState();
         }
-        BReporter.reportMissingWait(Req.second, Req.first, ErrorNode,
+        BReporter.reportMissingWait(Req, ReqRegion, ErrorNode,
                                     Ctx.getBugReporter());
       }
-      State = State->remove<RequestMap>(Req.first);
+      State = State->remove<RequestMap>(ReqRegion);
     }
   }
 
@@ -130,15 +144,86 @@ void MPIChecker::checkMissingWaits(SymbolReaper &SymReaper,
   }
 }
 
+void MPIChecker::checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx) const {
+  // For every currently known async operation...
+  for (const auto &[_, Rqst] : Ctx.getState()->get<RequestMap>()) {
+    // ... if the request is in the sending phase -> no error ...
+    if (Rqst.RqstState== Request::Wait) continue;
+
+    // ... if it's an unlocked buffer -> no error ...'
+    if (Rqst.Msg.MsgState == Message::Unlocked) continue;
+
+    // ... if it's a read in a write-frozen buffer -> no error ...
+    if (IsLoad && Rqst.Msg.MsgState == Message::WriteLocked) continue;
+
+    checkAccessViaBits(Loc, IsLoad, Stmt, Ctx, Rqst);
+  }
+}
+
+void MPIChecker::checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, Request Rqst) const {
+  const auto *const MsgRegion = Rqst.Msg.MsgRegion.getAsRegion();
+  const auto *const AccRegion = Loc.getAsRegion();
+
+  const auto MsgOffset = MsgRegion->getAsOffset();
+  const auto AccOffset = AccRegion->getAsOffset();
+
+  // Offsets need to be valid.
+  if (!MsgOffset.isValid() || !AccOffset.isValid()) {
+    return;
+  }
+
+  // Access and message are not in the same superregion.
+  if (MsgOffset.getRegion() != AccOffset.getRegion()) {
+    return;
+  }
+
+  // Msg or Access is symbolic. #TODO: Surely there must be a way to handle this better.
+  if (MsgOffset.hasSymbolicOffset() || AccOffset.hasSymbolicOffset()) {
+    llvm::errs() << "Symbolic offset detected!\n";
+    return;
+  }
+
+  const QualType MsgType = MsgRegion->getAs<TypedValueRegion>()->getValueType();
+  const auto MsgExtend = Ctx.getSValBuilder().makeIntVal(Ctx.getASTContext().getTypeSize(MsgType), MsgType);
+
+  llvm::errs() << "Buffer from: " << MsgOffset.getOffset() << ", extending: " << Rqst.Msg.MsgCount << " times " << MsgExtend << " ---- Access at: " << AccOffset.getOffset() << "\n";
+
+  // Start = MsgOffset
+  // End = MsgOffset + Rqst.Msg.MsgCount * MsgExtend
+  // if AccOffset.getOffset > Start und AccOffset.getOffset < End
+  // Error!
+  const auto Start = Ctx.getSValBuilder().makeIntVal(MsgOffset.getOffset(), MsgType);
+  auto End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Mul, Rqst.Msg.MsgCount, MsgExtend, MsgType);
+  End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Add, Start, End, MsgType);
+  auto AccOffsetVal = Ctx.getSValBuilder().makeIntVal(AccOffset.getOffset(), MsgType);
+
+  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccOffsetVal, Start, MsgType);
+  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccOffsetVal, End, MsgType);
+
+  llvm::errs() << "Start: " << Start << "\n";
+  llvm::errs() << "End: " << End << "\n";
+  llvm::errs() << "Access: " << AccOffsetVal << "\n";
+
+  llvm::errs() << "Right of start: " << RightOfStart << "\n";
+  llvm::errs() << "Left of end: " << LeftOfEnd << "\n";
+
+  if (RightOfStart.getAsInteger()->getExtValue() == 1 && LeftOfEnd.getAsInteger()->getExtValue() == 1 ) {
+    llvm::errs() << "UBA!\n";
+  }
+}
+
+
 const MemRegion *MPIChecker::topRegionUsedByWait(const CallEvent &CE) const {
 
   if (FuncClassifier->isMPI_Wait(CE.getCalleeIdentifier())) {
     return CE.getArgSVal(0).getAsRegion();
-  } else if (FuncClassifier->isMPI_Waitall(CE.getCalleeIdentifier())) {
-    return CE.getArgSVal(1).getAsRegion();
-  } else {
-    return (const MemRegion *)nullptr;
   }
+  if (FuncClassifier->isMPI_Waitall(CE.getCalleeIdentifier())) {
+    return CE.getArgSVal(1).getAsRegion();
+  }
+  return (const MemRegion *)nullptr;
 }
 
 void MPIChecker::allRegionsUsedByWait(

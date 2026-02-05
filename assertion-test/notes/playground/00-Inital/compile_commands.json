@@ -1,0 +1,7 @@
+[
+    {
+        "command": "c++ -c -o builds/code-mpi.out -I/usr/include/openmpi-x86_64 code.cpp",
+        "directory": "/home/jan/Code/BA-Thesis/playground",
+        "file": "/home/jan/Code/BA-Thesis/playground/code.cpp"
+    }
+]

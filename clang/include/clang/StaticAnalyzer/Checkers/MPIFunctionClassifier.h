@@ -46,6 +46,10 @@ public:
   bool isMPI_Waitall(const IdentifierInfo *const IdentInfo) const;
   bool isWaitType(const IdentifierInfo *const IdentInfo) const;
 
+  // memory access identifiers
+  bool isWriteLocking(const IdentifierInfo *const IdentInfo) const;
+  bool isFullLocking(const IdentifierInfo *const IdentInfo) const;
+
 private:
   // Initializes function identifiers, to recognize them during analysis.
   void identifierInit(ASTContext &ASTCtx);

@@ -27,7 +27,7 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
-class MPIChecker : public Checker<check::PreCall, check::DeadSymbols> {
+class MPIChecker : public Checker<check::PreCall, check::DeadSymbols, check::Location> {
 public:
   MPIChecker() : BReporter(*this) {}
 
@@ -41,6 +41,12 @@ public:
   void checkDeadSymbols(SymbolReaper &SymReaper, CheckerContext &Ctx) const {
     dynamicInit(Ctx);
     checkMissingWaits(SymReaper, Ctx);
+  }
+
+  void checkLocation(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx) const {
+    dynamicInit(Ctx);
+    checkUnsafeBufferAccess(Loc, IsLoad, Stmt, Ctx);
   }
 
   void dynamicInit(CheckerContext &Ctx) const {
@@ -71,6 +77,15 @@ public:
   /// request was a nonblocking call, this is rated as a missing wait.
   void checkMissingWaits(clang::ento::SymbolReaper &SymReaper,
                          clang::ento::CheckerContext &Ctx) const;
+
+  void checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx) const;
+
+  void checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, Request Rqst) const;
+
+  void checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, Request Rqst) const;
 
 private:
   /// Collects all memory regions of a request(array) used by a wait

@@ -278,6 +278,18 @@ bool MPIFunctionClassifier::isWaitType(const IdentifierInfo *IdentInfo) const {
   return IdentInfo == IdentInfo_MPI_Wait || IdentInfo == IdentInfo_MPI_Waitall;
 }
 
+// memory access identifiers
+bool MPIFunctionClassifier::isWriteLocking(const IdentifierInfo *const IdentInfo) const {
+  return IdentInfo == IdentInfo_MPI_Isend ||
+          IdentInfo == IdentInfo_MPI_Issend ||
+          IdentInfo == IdentInfo_MPI_Ibsend ||
+          IdentInfo == IdentInfo_MPI_Irsend;
+}
+
+bool MPIFunctionClassifier::isFullLocking(const IdentifierInfo *const IdentInfo) const {
+  return IdentInfo == IdentInfo_MPI_Irecv;
+}
+
 } // end of namespace: mpi
 } // end of namespace: ento
 } // end of namespace: clang

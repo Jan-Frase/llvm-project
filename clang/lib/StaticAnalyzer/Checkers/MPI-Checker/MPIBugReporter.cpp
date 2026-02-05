@@ -98,7 +98,7 @@ MPIBugReporter::RequestNodeVisitor::VisitNode(const ExplodedNode *N,
       N->getFirstPred()->getState()->get<RequestMap>(RequestRegion);
 
   // Check if request was previously unused or in a different state.
-  if (!PrevReq || (Req->CurrentState != PrevReq->CurrentState)) {
+  if (!PrevReq || (Req->RqstState != PrevReq->RqstState)) {
     IsNodeFound = true;
 
     ProgramPoint P = N->getFirstPred()->getLocation();
