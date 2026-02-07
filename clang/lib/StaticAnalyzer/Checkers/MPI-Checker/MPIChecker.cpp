@@ -157,11 +157,54 @@ void MPIChecker::checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt
     // ... if it's a read in a write-frozen buffer -> no error ...
     if (IsLoad && Rqst.Msg.MsgState == Message::WriteLocked) continue;
 
-    checkAccessViaBits(Loc, IsLoad, Stmt, Ctx, Rqst);
+    // checkAccessViaBits(Loc, IsLoad, Stmt, Ctx, Rqst);
+    checkAccessBetter(Loc, IsLoad, Stmt, Ctx, Rqst);
   }
 }
 
-void MPIChecker::checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
+void MPIChecker::checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, Request Rqst) const {
+  if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != Loc.getAsRegion()->getBaseRegion())
+    return;
+  const QualType MsgType = Rqst.Msg.MsgRegion.getAsRegion()->getAs<TypedValueRegion>()->getValueType();
+
+  // TODO: Deal with scalars.
+  if (!Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>())
+    return;
+
+  const auto MessageIndex = Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>()->getIndex();
+  const auto MessageCount = Rqst.Msg.MsgCount.castAs<NonLoc>();
+  const auto AccessIndex= Loc.getAsRegion()->getAs<ElementRegion>()->getIndex();
+
+  llvm::errs() << "Message index: " << MessageIndex << ", Message count: " << MessageCount << ", Access index: " << AccessIndex << "\n";
+
+  const auto End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Add, MessageIndex, MessageCount, MsgType);
+
+  // Eh>
+
+  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccessIndex, MessageIndex, Ctx.getSValBuilder().getConditionType());
+  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccessIndex, End, Ctx.getSValBuilder().getConditionType());
+
+  llvm::errs() << "Start: " << MessageIndex << "\n";
+  llvm::errs() << "End: " << End << "\n";
+  llvm::errs() << "Access: " << AccessIndex << "\n";
+
+  llvm::errs() << "Right of start: " << RightOfStart << "\n";
+  llvm::errs() << "Left of end: " << LeftOfEnd << "\n";
+
+  const auto CombinedCondition = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LAnd, RightOfStart, LeftOfEnd, Ctx.getSValBuilder().getConditionType());
+
+  llvm::errs() << "Combined condition: " << CombinedCondition << "\n";
+  const auto simplifiedCondition = Ctx.getSValBuilder().simplifySVal(Ctx.getState(), CombinedCondition);
+  llvm::errs() << "Simplified condition: " << simplifiedCondition << "\n";
+
+  if (const auto S1 = Ctx.getState()->assume(
+          CombinedCondition.castAs<DefinedSVal>(), true)) {
+    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
+  }
+}
+
+  void MPIChecker::checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx, Request Rqst) const {
   const auto *const MsgRegion = Rqst.Msg.MsgRegion.getAsRegion();
   const auto *const AccRegion = Loc.getAsRegion();
@@ -179,7 +222,7 @@ void MPIChecker::checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
     return;
   }
 
-  // Msg or Access is symbolic. #TODO: Surely there must be a way to handle this better.
+  // Msg or Access is symbolic.
   if (MsgOffset.hasSymbolicOffset() || AccOffset.hasSymbolicOffset()) {
     llvm::errs() << "Symbolic offset detected!\n";
     return;

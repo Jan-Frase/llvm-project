@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void foo(int a, int b, int c) {
+void foo(int a) {
   int rank, size;
   MPI_Init(NULL, NULL);
 
@@ -13,20 +13,16 @@ void foo(int a, int b, int c) {
 
   int buf_size = 1000000;
 
+  if (a < 50) return;
+
   int *buf = (int *)malloc(buf_size * sizeof(int));
-
-  if (a > 5 || b > 5)
-    return;
-
-  if (c < 100)
-    return;
 
   // Sender
   if (rank == 0) {
     // Start nonblocking send
-    MPI_Isend(buf + a, b, MPI_INT, 1, 0, MPI_COMM_WORLD, &request);
+    MPI_Isend(buf + a, 100, MPI_INT, 1, 0, MPI_COMM_WORLD, &request);
     // "Accidentally" overwrite the buffer before send completes
-    buf[c] = 666;
+    buf[20] = 666;
 
     // Wait
     MPI_Wait(&request, MPI_STATUS_IGNORE);
