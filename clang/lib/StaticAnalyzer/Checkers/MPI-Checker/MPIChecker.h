@@ -85,6 +85,12 @@ public:
                                    CheckerContext &Ctx, Request Rqst) const;
 
   void checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
+  CheckerContext &Ctx, Request Rqst) const;
+
+  void checkAccessBest(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
+  CheckerContext &Ctx, Request Rqst) const;
+
+  void checkAccessFuck(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx, Request Rqst) const;
 
 private:
