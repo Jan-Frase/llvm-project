@@ -12,7 +12,7 @@ namespace clang {
 namespace ento {
 namespace memfreeze {
 
-enum State : unsigned char { Read_Write_Frozen, Write_Frozen, Unfrozen };
+enum State : unsigned char { Read_Write_Locked, Write_Locked, Unlocked };
 // This represents something like Request in MPI.
 // So some sort of object that manages a non-blocking operation.
 // It keeps track of the state of the operation and the relevant memory.

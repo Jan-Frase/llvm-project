@@ -21,6 +21,7 @@ namespace memfreeze {
 // ========================================
 void MemLockChecker::checkPostCall(const CallEvent &call,
                                    CheckerContext &context) const {
+  const auto state = context.getState();
   // Get the function declarations name...
   const auto a = call.getDecl();
   if (a == nullptr) return;
@@ -33,36 +34,35 @@ void MemLockChecker::checkPostCall(const CallEvent &call,
       config_handler.doc.full_locker.begin(),
       config_handler.doc.full_locker.end(),
       [&fn_name](const Freezer &freezer) { return freezer.name == fn_name; });
-  const bool read_write_locker_found = read_write_locker_data != config_handler.doc.full_locker.end();
+  const bool is_read_write_locker = read_write_locker_data != config_handler.doc.full_locker.end();
 
   // ... or in the list of write-freezers ...
   const auto write_locker_data = std::find_if(
       config_handler.doc.write_locker.begin(),
       config_handler.doc.write_locker.end(),
       [&fn_name](const Freezer &freezer) { return freezer.name == fn_name; });
-  const bool write_locker_found = write_locker_data != config_handler.doc.write_locker.end();
+  const bool is_write_locker = write_locker_data != config_handler.doc.write_locker.end();
 
-  // If the function is not an unfreezer -> Return.
-  if (!read_write_locker_found && !write_locker_found) return;
+  // If the function is not a locker -> Return.
+  if (!is_read_write_locker && !is_write_locker) return;
 
   // If the name appears in both lists -> Config incorrect!
-  if (read_write_locker_found && write_locker_found) {
+  if (is_read_write_locker && is_write_locker) {
     llvm::errs() << "Function " << fn_name << " is both a read-write locker and a write locker!\n";
     return;
   }
 
   // Get the lock index according to the config.
-  const int lock_idx = read_write_locker_found ? read_write_locker_data->lock_idx : write_locker_data->lock_idx;
+  const int lock_idx = is_read_write_locker ? read_write_locker_data->lock_idx : write_locker_data->lock_idx;
 
   // Get the lock region.
   const auto *const lock_region = call.getArgSVal(lock_idx).getAsRegion();
 
   // Check if we are already aware of this operation.
-  const AsyncOperation *old_operation =
-      context.getState()->get<AsyncOperationMap>(lock_region);
+  auto *old_operation = state->get<AsyncOperationMap>(lock_region);
 
-  // If we are, and it's already frozen, it's an error!
-  if (old_operation && old_operation->current_state != Unfrozen) {
+  // If we are, and it's already locked, it's an error!
+  if (old_operation && old_operation->current_state != Unlocked) {
     ExplodedNode *error_node = context.generateNonFatalErrorNode();
     bug_reporter.reportDoubleNonblocking(call, *old_operation, lock_region, error_node, context.getBugReporter());
     context.addTransition(error_node->getState(), error_node);
@@ -70,26 +70,24 @@ void MemLockChecker::checkPostCall(const CallEvent &call,
   }
 
   // Get buffer index.
-  const int buffer_idx = read_write_locker_found ? read_write_locker_data->buffer_idx : write_locker_data->buffer_idx;
+  const int buffer_idx = is_read_write_locker ? read_write_locker_data->buffer_idx : write_locker_data->buffer_idx;
   // Get the buffer pointer, read its value (which is the location it points to) and get that location as a region.
-  const auto *buffer_region = call.getArgSVal(buffer_idx).getAs<Loc>().value().getAsRegion();
+  const auto *buffer_region = call.getArgSVal(buffer_idx).getAsRegion();
 
-  // If what is being sent is some kind of array, struct etc. - go up one region
+  // If the buffer is an array or struct -> go up one region
   switch (buffer_region->getKind()) {
   case MemRegion::ElementRegionKind:
   case MemRegion::FieldRegionKind:
-  case MemRegion::ObjCIvarRegionKind:
-  case MemRegion::CXXBaseObjectRegionKind:
-  case MemRegion::CXXDerivedObjectRegionKind:
     buffer_region= cast<SubRegion>(buffer_region)->getSuperRegion();
     break;
   default:
     break;
   }
 
-  const AsyncOperation async_operation(read_write_locker_found ? Read_Write_Frozen : Write_Frozen, buffer_region);
-  const ProgramStateRef state = context.getState()->set<AsyncOperationMap>(lock_region, async_operation);
-  context.addTransition(state);
+  const auto lock = is_read_write_locker ? Read_Write_Locked : Write_Locked;
+  const AsyncOperation async_operation(lock, buffer_region);
+  const ProgramStateRef new_state = state->set<AsyncOperationMap>(lock_region, async_operation);
+  context.addTransition(new_state);
 }
 
 // ========================================
@@ -125,7 +123,7 @@ void MemLockChecker::checkPreCall(const CallEvent &call_event,
   const bool old_ao_found = old_async_operation != nullptr;
 
   // Update/Create operation, either without a buffer or with if we know which one.
-  const AsyncOperation new_async_operation(Unfrozen, old_ao_found ? old_async_operation->buffer_region : nullptr);
+  const AsyncOperation new_async_operation(Unlocked, old_ao_found ? old_async_operation->buffer_region : nullptr);
   const ProgramStateRef new_state = context.getState()->set<AsyncOperationMap>(lock_region, new_async_operation);
 
   // If we are aware of an operation -> Everything is fine.
@@ -167,7 +165,7 @@ void MemLockChecker::checkDeadSymbols(SymbolReaper &sym_reaper,
     }
 
     // ... if it's in the unfrozen state -> it's fine.
-    if (async_op.current_state == Unfrozen) {
+    if (async_op.current_state == Unlocked) {
       continue;
     }
 
@@ -208,10 +206,10 @@ void MemLockChecker::checkLocation(SVal location, bool is_load, const Stmt *stat
   // For every currently known async operation...
   for (const auto &[_, async_op] : state->get<AsyncOperationMap>()) {
     // ... if the request is in the sending phase -> no error ...
-    if (async_op.current_state == Unfrozen) continue;
+    if (async_op.current_state == Unlocked) continue;
 
     // ... if it's a read in a write-frozen buffer -> no error ...
-    if (is_load && async_op.current_state == Write_Frozen) continue;
+    if (is_load && async_op.current_state == Write_Locked) continue;
 
     // ... and if nothing is null ...
     if (!async_op.buffer_region || !modified_region) continue;
