@@ -15,17 +15,13 @@ void foo(int a, int b, int c) {
 
   int *buf = (int *)malloc(buf_size * sizeof(int));
 
-  if (a != 0)
-	return;
-  if (b > 100)
-    return;
-  if (c < 150)
+  if (c < 100)
     return;
 
   // Sender
   if (rank == 0) {
     // Start nonblocking send
-    MPI_Isend(buf, 100, MPI_INT, 1, 0, MPI_COMM_WORLD, &request);
+    MPI_Isend(buf + 10, 10, MPI_INT, 1, 0, MPI_COMM_WORLD, &request);
     // "Accidentally" overwrite the buffer before send completes
     buf[c] = 666;
 

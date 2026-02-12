@@ -180,10 +180,8 @@ void MPIChecker::checkAccessFuck(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
   const auto ArrayRegion = Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion();
   const auto ArrayElementType = Rqst.Msg.MsgRegion.getAsRegion()->getAs<TypedValueRegion>()->getValueType();
 
-  const auto MsgEnd = Ctx.getStoreManager().getRegionManager().getElementRegion(ArrayElementType, Rqst.Msg.MsgCount.castAs<NonLoc>(), ArrayRegion->castAs<SubRegion>(), Ctx.getASTContext());
-
   const auto StartIndex = Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>()->getIndex();
-  const auto EndIndex = MsgEnd->getIndex();
+  const auto EndIndex = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Add, StartIndex, Rqst.Msg.MsgCount.castAs<NonLoc>(), StartIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
   const auto AccessIndex = AccessLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
 
   llvm::errs() << "Start Index: \n";
@@ -193,15 +191,38 @@ void MPIChecker::checkAccessFuck(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
   llvm::errs() << "\nAccess Index: \n";
   AccessIndex.dump();
 
+  // if (!StartIndex.isConstant() || !EndIndex.isConstant() || !AccessIndex.isConstant()) return;
+
+  /*
+  const auto RightOfStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Sub, AccessIndex, StartIndex, AccessIndex.getType(Ctx.getASTContext()));
+  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Sub, AccessIndex, EndIndex, AccessIndex.getType(Ctx.getASTContext()));
+  const auto Combinedd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Mul, RightOfStart.castAs<NonLoc>(), LeftOfEnd.castAs<NonLoc>(), RightOfStart.getType(Ctx.getASTContext()));
+
+  const auto Zero = Ctx.getSValBuilder().makeZeroVal(AccessIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
+  const auto Condition = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, Combinedd.castAs<NonLoc>(), Zero, Ctx.getSValBuilder().getConditionType());
+
+  llvm::errs() << "\nCondition: " << Condition << "\n";
+  Ctx.getState()->dump();
+  const auto S1 = Ctx.getState()->assume(Condition.castAs<DefinedSVal>(), true);
+  S1->dump();
+  if (S1) {
+    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
+          }
+
+  return;
+  */
+
   const auto AfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
   const auto BeforeEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, AccessIndex, EndIndex, Ctx.getSValBuilder().getConditionType());
 
   llvm::errs() << "\nAfter start: " << AfterStart << "\n";
   llvm::errs() << "\nBefore end: " << BeforeEnd << "\n";
 
-  const auto Combined = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LAnd, AfterStart.castAs<NonLoc>(), BeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
+  const auto Combined = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, AfterStart.castAs<NonLoc>(), BeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
 
   llvm::errs() << "\nCombined condition: " << Combined << "\n";
+
+  Ctx.getState()->dump();
 
   if (const auto S1 = Ctx.getState()->assume(
           Combined.castAs<DefinedSVal>(), true)) {
@@ -302,6 +323,11 @@ void MPIChecker::checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
   const auto *const MsgRegion = Rqst.Msg.MsgRegion.getAsRegion();
   const auto *const AccRegion = Loc.getAsRegion();
 
+  if (MsgRegion == AccRegion) {
+    llvm::errs() << "UBA!\n";
+    return;
+  }
+
   const auto MsgOffset = MsgRegion->getAsOffset();
   const auto AccOffset = AccRegion->getAsOffset();
 
@@ -335,8 +361,9 @@ void MPIChecker::checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
   End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Add, Start, End, MsgType);
   auto AccOffsetVal = Ctx.getSValBuilder().makeIntVal(AccOffset.getOffset(), MsgType);
 
-  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccOffsetVal, Start, MsgType);
-  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccOffsetVal, End, MsgType);
+  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccOffsetVal, Start, Ctx.getSValBuilder().getConditionType());
+  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccOffsetVal, End, Ctx.getSValBuilder().getConditionType());
+  const auto CombinedCondition = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LAnd, RightOfStart, LeftOfEnd, Ctx.getSValBuilder().getConditionType());
 
   llvm::errs() << "Start: " << Start << "\n";
   llvm::errs() << "End: " << End << "\n";
