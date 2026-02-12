@@ -52,7 +52,7 @@ for dir in dirs:
         if result.returncode == 1:
             print("Clang crashed!")
 
-        did_emit_warning = "UBA" in result.stderr
+        did_emit_warning = "buffer" in result.stderr
 
         if SHOW_WARNINGS:
             print()

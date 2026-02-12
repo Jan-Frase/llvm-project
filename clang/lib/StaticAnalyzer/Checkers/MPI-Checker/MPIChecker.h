@@ -78,20 +78,11 @@ public:
   void checkMissingWaits(clang::ento::SymbolReaper &SymReaper,
                          clang::ento::CheckerContext &Ctx) const;
 
-  void checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt,
+  void checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx) const;
 
-  void checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const;
-
-  void checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
-  CheckerContext &Ctx, Request Rqst) const;
-
-  void checkAccessBest(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-  CheckerContext &Ctx, Request Rqst) const;
-
-  void checkAccessFuck(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const;
+  void checkArrayAccess(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion) const;
 
 private:
   /// Collects all memory regions of a request(array) used by a wait

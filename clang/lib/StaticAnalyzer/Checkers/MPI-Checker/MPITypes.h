@@ -28,7 +28,7 @@ class Message {
 public:
   enum MessageState : unsigned char { FullLocked, WriteLocked, Unlocked };
 
-  Message(const MessageState MS, const SVal MessageRegion, const SVal MsgCount) : MsgState{MS}, MsgRegion {MessageRegion}, MsgCount {MsgCount} {}
+  Message(const MessageState MS, const SVal MessageRegion, const SVal MsgCount, const SourceRange LockSourceRange) : MsgState{MS}, MsgRegion {MessageRegion}, MsgCount {MsgCount}, LockSourceRange {LockSourceRange} {}
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(MsgState);
@@ -45,14 +45,15 @@ public:
   const MessageState MsgState;
   const SVal MsgRegion;
   const SVal MsgCount;
+  const SourceRange LockSourceRange;
 };
 
 class Request {
 public:
   enum RequestState : unsigned char { Nonblocking, Wait };
 
-  Request(const RequestState RS, const Message Msg) : RqstState{RS}, Msg{Msg} {}
-  Request(const RequestState RS) : RqstState{RS}, Msg(Message(Message::Unlocked, SVal(), SVal())) {}
+  Request(const RequestState RS, const Message &Msg) : RqstState{RS}, Msg{Msg} {}
+  Request(const RequestState RS) : RqstState{RS}, Msg(Message(Message::Unlocked, SVal(), SVal(), SourceRange())) {}
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(RqstState);

@@ -55,19 +55,30 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
   // no error
   const bool isFullLocking = FuncClassifier->isFullLocking(PreCallEvent.getCalleeIdentifier());
   const bool isWriteLocking = FuncClassifier->isWriteLocking(PreCallEvent.getCalleeIdentifier());
-  const Message::MessageState MsgState = isFullLocking ? Message::MessageState::FullLocked: (isWriteLocking ? Message::MessageState::WriteLocked : Message::MessageState::Unlocked);
 
-  const SVal MsgRegion = PreCallEvent.getArgSVal(0);
-  const SVal MsgCount = PreCallEvent.getArgSVal(1);
+  Message::MessageState msgState;
+  if (isFullLocking) {
+    msgState = Message::MessageState::FullLocked;
+  } else if (isWriteLocking) {
+    msgState = Message::MessageState::WriteLocked;
+  } else {
+    msgState = Message::MessageState::Unlocked;
+  }
 
-  const Request NewReq = MsgState == Message::MessageState::Unlocked ||
-                           MsgRegion.isUnknownOrUndef() ||
-                           MsgCount.isUnknownOrUndef()
-                       ? Request(Request::RequestState::Nonblocking)
-                       : Request(Request::RequestState::Nonblocking,
-                                 Message(MsgState, MsgRegion, MsgCount));
+  // Extract arguments
+  SVal msgRegion = PreCallEvent.getArgSVal(0);
+  SVal msgCount = PreCallEvent.getArgSVal(1);
 
-  State = State->set<RequestMap>(RequestRegion, NewReq);
+  // Construct request
+  if (msgState == Message::MessageState::Unlocked ||
+      msgRegion.isUnknownOrUndef() || msgCount.isUnknownOrUndef()) {
+    auto NewReq = Request(Request::RequestState::Nonblocking);
+    State = State->set<RequestMap>(RequestRegion, NewReq);
+  } else {
+    Message message(msgState, msgRegion, msgCount, PreCallEvent.getSourceRange());
+    auto NewReq = Request(Request::RequestState::Nonblocking, message);
+    State = State->set<RequestMap>(RequestRegion, NewReq);
+  }
   Ctx.addTransition(State);
 }
 
@@ -84,7 +95,7 @@ void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
   if (!isa<TypedRegion>(MR) || (ER && !isa<TypedRegion>(ER->getSuperRegion())))
     return;
 
-  llvm::SmallVector<const MemRegion *, 2> ReqRegions;
+  SmallVector<const MemRegion *, 2> ReqRegions;
   allRegionsUsedByWait(ReqRegions, MR, PreCallEvent, Ctx);
   if (ReqRegions.empty())
     return;
@@ -147,10 +158,10 @@ void MPIChecker::checkMissingWaits(SymbolReaper &SymReaper,
   }
 }
 
-void MPIChecker::checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt,
+void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx) const {
   // For every currently known async operation...
-  for (const auto &[_, Rqst] : Ctx.getState()->get<RequestMap>()) {
+  for (const auto &[RqstRegion, Rqst] : Ctx.getState()->get<RequestMap>()) {
     // ... if the request is in the sending phase -> no error ...
     if (Rqst.RqstState== Request::Wait) continue;
 
@@ -160,223 +171,48 @@ void MPIChecker::checkUnsafeBufferAccess(SVal Loc, bool IsLoad, const Stmt *Stmt
     // ... if it's a read in a write-frozen buffer -> no error ...
     if (IsLoad && Rqst.Msg.MsgState == Message::WriteLocked) continue;
 
-    // checkAccessViaBits(Loc, IsLoad, Stmt, Ctx, Rqst);
-    // checkAccessBetter(Loc, IsLoad, Stmt, Ctx, Rqst); // Best one i suppose.
-    // checkAccessBest(Loc, IsLoad, Stmt, Ctx, Rqst);
-    checkAccessFuck(Loc, IsLoad, Stmt, Ctx, Rqst);
+    // ... if it's not in the same base region -> no error ...
+    if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != AccessLoc.getAsRegion()->getBaseRegion())
+      return;
+
+    // ... if it's in the same region -> report error.
+    if (Rqst.Msg.MsgRegion.getAsRegion() == AccessLoc.getAsRegion()) {
+      auto ErrorNode = Ctx.generateNonFatalErrorNode();
+      BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+      continue;
+    }
+
+    // Array handling:
+    if (Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>() && AccessLoc.getAsRegion()->getAs<ElementRegion>()) {
+      checkArrayAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion);
+      continue;
+    }
+
+    if (AccessLoc.getAsRegion()->isSubRegionOf(Rqst.Msg.MsgRegion.getAsRegion())) {
+      auto ErrorNode = Ctx.generateNonFatalErrorNode();
+      BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+    }
   }
 }
 
-void MPIChecker::checkAccessFuck(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const {
-  if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != AccessLoc.getAsRegion()->getBaseRegion())
-    return;
-
-  if (Rqst.Msg.MsgRegion.getAsRegion() == AccessLoc.getAsRegion()) {
-    llvm::errs() << "UBA!\n";
-    return;
-  }
-
-  const auto ArrayRegion = Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion();
-  const auto ArrayElementType = Rqst.Msg.MsgRegion.getAsRegion()->getAs<TypedValueRegion>()->getValueType();
-
+void MPIChecker::checkArrayAccess(const SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion) const {
   const auto StartIndex = Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>()->getIndex();
   const auto EndIndex = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Add, StartIndex, Rqst.Msg.MsgCount.castAs<NonLoc>(), StartIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
   const auto AccessIndex = AccessLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
 
-  llvm::errs() << "Start Index: \n";
-  StartIndex.dump();
-  llvm::errs() << "\nEnd Index: \n";
-  EndIndex.dump();
-  llvm::errs() << "\nAccess Index: \n";
-  AccessIndex.dump();
+  const auto IsAfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
+  const auto IsBeforeEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, AccessIndex, EndIndex, Ctx.getSValBuilder().getConditionType());
 
-  // if (!StartIndex.isConstant() || !EndIndex.isConstant() || !AccessIndex.isConstant()) return;
+  const auto IsInside = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, IsAfterStart.castAs<NonLoc>(), IsBeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
 
-  /*
-  const auto RightOfStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Sub, AccessIndex, StartIndex, AccessIndex.getType(Ctx.getASTContext()));
-  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Sub, AccessIndex, EndIndex, AccessIndex.getType(Ctx.getASTContext()));
-  const auto Combinedd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Mul, RightOfStart.castAs<NonLoc>(), LeftOfEnd.castAs<NonLoc>(), RightOfStart.getType(Ctx.getASTContext()));
+  if (!IsInside.isConstant()) return;
 
-  const auto Zero = Ctx.getSValBuilder().makeZeroVal(AccessIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
-  const auto Condition = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, Combinedd.castAs<NonLoc>(), Zero, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "\nCondition: " << Condition << "\n";
-  Ctx.getState()->dump();
-  const auto S1 = Ctx.getState()->assume(Condition.castAs<DefinedSVal>(), true);
-  S1->dump();
-  if (S1) {
-    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
-          }
-
-  return;
-  */
-
-  const auto AfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
-  const auto BeforeEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, AccessIndex, EndIndex, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "\nAfter start: " << AfterStart << "\n";
-  llvm::errs() << "\nBefore end: " << BeforeEnd << "\n";
-
-  const auto Combined = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, AfterStart.castAs<NonLoc>(), BeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "\nCombined condition: " << Combined << "\n";
-
-  Ctx.getState()->dump();
-
-  if (const auto S1 = Ctx.getState()->assume(
-          Combined.castAs<DefinedSVal>(), true)) {
-    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
+  if (const auto S1 = Ctx.getState()->assume(IsInside.castAs<DefinedSVal>(), true)) {
+    auto ErrorNode = Ctx.generateNonFatalErrorNode(S1);
+    BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
   }
 }
-
-void MPIChecker::checkAccessBest(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const {
-  if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != AccessLoc.getAsRegion()->getBaseRegion())
-    return;
-  const QualType MsgType = Rqst.Msg.MsgRegion.getAsRegion()->getAs<TypedValueRegion>()->getValueType();
-
-  // TODO: Deal with scalars.
-  if (!Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>())
-    return;
-
-  const auto MessageIndex = Rqst.Msg.MsgRegion.castAs<Loc>();
-  const auto MessageCount = Rqst.Msg.MsgCount.castAs<NonLoc>();
-  const auto AccessIndex= AccessLoc.castAs<Loc>();
-
-  llvm::errs() << "Message index: " << MessageIndex << ", Message count: " << MessageCount << ", Access index: " << AccessIndex << "\n";
-
-  SVal Diff = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Sub, AccessIndex, MessageIndex, MessageIndex.getType(Ctx.getASTContext()));
-
-  NonLoc DiffNL = Diff.castAs<NonLoc>();
-
-  SVal Zero = Ctx.getSValBuilder().makeZeroVal(AccessIndex.getType(Ctx.getASTContext()));
-
-  SVal Lower =
-    Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, DiffNL,
-                  Zero.castAs<NonLoc>(),
-                  Ctx.getSValBuilder().getConditionType());
-
-  SVal Upper =
-    Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, DiffNL,
-                  MessageCount,
-                  Ctx.getSValBuilder().getConditionType());
-
-  if (Lower.isUnknownOrUndef() || Upper.isUnknownOrUndef()) return;
-
-  const auto CombinedCondition = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LAnd, Lower, Upper, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "Combined condition: " << CombinedCondition << "\n";
-
-  if (CombinedCondition.isUnknownOrUndef()) return;
-
-  if (const auto S1 = Ctx.getState()->assume(
-          CombinedCondition.castAs<DefinedSVal>(), true)) {
-    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
-  }
-}
-
-void MPIChecker::checkAccessBetter(SVal Loc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const {
-  if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != Loc.getAsRegion()->getBaseRegion())
-    return;
-  const QualType MsgType = Rqst.Msg.MsgRegion.getAsRegion()->getAs<TypedValueRegion>()->getValueType();
-
-  // TODO: Deal with scalars.
-  if (!Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>())
-    return;
-
-  const auto MessageIndex = Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>()->getIndex();
-  const auto MessageCount = Rqst.Msg.MsgCount.castAs<NonLoc>();
-  const auto AccessIndex= Loc.getAsRegion()->getAs<ElementRegion>()->getIndex();
-
-  llvm::errs() << "Message index: " << MessageIndex << ", Message count: " << MessageCount << ", Access index: " << AccessIndex << "\n";
-
-  const auto End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Add, MessageIndex, MessageCount, MessageIndex.getType(Ctx.getASTContext()));
-
-  // Eh>
-
-  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccessIndex, MessageIndex, Ctx.getSValBuilder().getConditionType());
-  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccessIndex, End, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "Start: " << MessageIndex << "\n";
-  llvm::errs() << "End: " << End << "\n";
-  llvm::errs() << "Access: " << AccessIndex << "\n";
-
-  llvm::errs() << "Right of start: " << RightOfStart << "\n";
-  llvm::errs() << "Left of end: " << LeftOfEnd << "\n";
-
-  const auto CombinedCondition = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LAnd, RightOfStart, LeftOfEnd, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "Combined condition: " << CombinedCondition << "\n";
-  const auto simplifiedCondition = Ctx.getSValBuilder().simplifySVal(Ctx.getState(), CombinedCondition);
-  llvm::errs() << "Simplified condition: " << simplifiedCondition << "\n";
-
-  if (const auto S1 = Ctx.getState()->assume(
-          CombinedCondition.castAs<DefinedSVal>(), true)) {
-    llvm::errs() << Lexer::getSourceText(CharSourceRange::getTokenRange(Stmt->getSourceRange()), Ctx.getSourceManager(), Ctx.getLangOpts()) << " ==> is UBA!\n";
-  }
-}
-
-  void MPIChecker::checkAccessViaBits(SVal Loc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, Request Rqst) const {
-  const auto *const MsgRegion = Rqst.Msg.MsgRegion.getAsRegion();
-  const auto *const AccRegion = Loc.getAsRegion();
-
-  if (MsgRegion == AccRegion) {
-    llvm::errs() << "UBA!\n";
-    return;
-  }
-
-  const auto MsgOffset = MsgRegion->getAsOffset();
-  const auto AccOffset = AccRegion->getAsOffset();
-
-  // Offsets need to be valid.
-  if (!MsgOffset.isValid() || !AccOffset.isValid()) {
-    return;
-  }
-
-  // Access and message are not in the same superregion.
-  if (MsgOffset.getRegion() != AccOffset.getRegion()) {
-    return;
-  }
-
-  // Msg or Access is symbolic.
-  if (MsgOffset.hasSymbolicOffset() || AccOffset.hasSymbolicOffset()) {
-    llvm::errs() << "Symbolic offset detected!\n";
-    return;
-  }
-
-  const QualType MsgType = MsgRegion->getAs<TypedValueRegion>()->getValueType();
-  const auto MsgExtend = Ctx.getSValBuilder().makeIntVal(Ctx.getASTContext().getTypeSize(MsgType), MsgType);
-
-  llvm::errs() << "Buffer from: " << MsgOffset.getOffset() << ", extending: " << Rqst.Msg.MsgCount << " times " << MsgExtend << " ---- Access at: " << AccOffset.getOffset() << "\n";
-
-  // Start = MsgOffset
-  // End = MsgOffset + Rqst.Msg.MsgCount * MsgExtend
-  // if AccOffset.getOffset > Start und AccOffset.getOffset < End
-  // Error!
-  const auto Start = Ctx.getSValBuilder().makeIntVal(MsgOffset.getOffset(), MsgType);
-  auto End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Mul, Rqst.Msg.MsgCount, MsgExtend, MsgType);
-  End = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_Add, Start, End, MsgType);
-  auto AccOffsetVal = Ctx.getSValBuilder().makeIntVal(AccOffset.getOffset(), MsgType);
-
-  const auto RightOfStart = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_GE, AccOffsetVal, Start, Ctx.getSValBuilder().getConditionType());
-  const auto LeftOfEnd = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LT, AccOffsetVal, End, Ctx.getSValBuilder().getConditionType());
-  const auto CombinedCondition = Ctx.getSValBuilder().evalBinOp(Ctx.getState(), BO_LAnd, RightOfStart, LeftOfEnd, Ctx.getSValBuilder().getConditionType());
-
-  llvm::errs() << "Start: " << Start << "\n";
-  llvm::errs() << "End: " << End << "\n";
-  llvm::errs() << "Access: " << AccOffsetVal << "\n";
-
-  llvm::errs() << "Right of start: " << RightOfStart << "\n";
-  llvm::errs() << "Left of end: " << LeftOfEnd << "\n";
-
-  if (RightOfStart.getAsInteger()->getExtValue() == 1 && LeftOfEnd.getAsInteger()->getExtValue() == 1 ) {
-    llvm::errs() << "UBA!\n";
-  }
-}
-
 
 const MemRegion *MPIChecker::topRegionUsedByWait(const CallEvent &CE) const {
 

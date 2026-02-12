@@ -28,7 +28,8 @@ public:
   MPIBugReporter(const CheckerBase &CB)
       : UnmatchedWaitBugType(&CB, "Unmatched wait", MPIError),
         MissingWaitBugType(&CB, "Missing wait", MPIError),
-        DoubleNonblockingBugType(&CB, "Double nonblocking", MPIError) {}
+        DoubleNonblockingBugType(&CB, "Double nonblocking", MPIError),
+        UnsafeBufferAccessBugType(&CB, "Unsafe buffer access", MPIError) {}
 
   /// Report duplicate request use by nonblocking calls without intermediate
   /// wait.
@@ -66,11 +67,18 @@ public:
                            const ExplodedNode *const ExplNode,
                            BugReporter &BReporter) const;
 
+
+
+  ///
+  void reportUnsafeBufferAccess(const SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion, const ExplodedNode *const ExlNode, BugReporter &BReporter) const;
+
 private:
   const llvm::StringLiteral MPIError = "MPI Error";
   const BugType UnmatchedWaitBugType;
   const BugType MissingWaitBugType;
   const BugType DoubleNonblockingBugType;
+  const BugType UnsafeBufferAccessBugType;
 
   /// Bug visitor class to find the node where the request region was previously
   /// used in order to include it into the BugReport path.

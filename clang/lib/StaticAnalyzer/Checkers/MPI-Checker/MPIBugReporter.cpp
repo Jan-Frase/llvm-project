@@ -83,6 +83,19 @@ void MPIBugReporter::reportUnmatchedWait(
   BReporter.emitReport(std::move(Report));
 }
 
+void MPIBugReporter::reportUnsafeBufferAccess(const SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
+                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion, const ExplodedNode *const ExlNode, BugReporter &BReporter) const {
+  std::string ErrorText = IsLoad ? "Read from locked buffer. " : "Write to locked buffer. ";
+
+  auto Report = std::make_unique<PathSensitiveBugReport>(UnsafeBufferAccessBugType, ErrorText, ExlNode);
+  Report->addRange(Stmt->getSourceRange());
+  Report->addRange(Rqst.Msg.LockSourceRange);
+
+  BReporter.emitReport(std::move(Report));
+}
+
+
+
 PathDiagnosticPieceRef
 MPIBugReporter::RequestNodeVisitor::VisitNode(const ExplodedNode *N,
                                               BugReporterContext &BRC,
