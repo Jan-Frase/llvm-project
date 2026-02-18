@@ -28,22 +28,22 @@ class Message {
 public:
   enum MessageState : unsigned char { FullLocked, WriteLocked, Unlocked };
 
-  Message(const MessageState MS, const SVal MessageRegion, const SVal MsgCount, const SourceRange LockSourceRange) : MsgState{MS}, MsgRegion {MessageRegion}, MsgCount {MsgCount}, LockSourceRange {LockSourceRange} {}
+  Message(const MessageState MS, const SVal MessageRegion, const SVal MsgCount, const SourceRange LockSourceRange) : MsgState{MS}, MsgLoc {MessageRegion}, MsgCount {MsgCount}, LockSourceRange {LockSourceRange} {}
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(MsgState);
-    Id.Add(MsgRegion);
+    Id.Add(MsgLoc);
     Id.Add(MsgCount);
   }
 
   bool operator==(const Message &ToCompare) const {
     return MsgState == ToCompare.MsgState &&
-        MsgRegion == ToCompare.MsgRegion &&
+        MsgLoc == ToCompare.MsgLoc &&
           MsgCount == ToCompare.MsgCount;
   }
 
   const MessageState MsgState;
-  const SVal MsgRegion;
+  const SVal MsgLoc;
   const SVal MsgCount;
   const SourceRange LockSourceRange;
 };

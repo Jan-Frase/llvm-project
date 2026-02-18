@@ -2,12 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stddef.h>
-#include <string.h>
 
 typedef struct {
+  float a;
+  float b;
   int data[1000000];
-  int a;
-  int b;
 } Buffer;
 
 int main(int argc, char *argv[]) {
@@ -19,15 +18,12 @@ int main(int argc, char *argv[]) {
 
   MPI_Request request;
 
-  Buffer *buf = (Buffer *)malloc(sizeof(Buffer));
-  Buffer *buftwo = (Buffer *)malloc(sizeof(Buffer));
-
   // Create MPI datatype for Buffer
   MPI_Datatype MPI_Buffer_type;
 
-  int blocklengths[3] = {1, 1, 1000000};
+  int blocklengths[3] = {1, 1, 1};
   MPI_Aint offsets[3];
-  MPI_Datatype types[3] = {MPI_INT, MPI_INT, MPI_INT};
+  MPI_Datatype types[3] = {MPI_INT, MPI_FLOAT, MPI_INT};
 
   offsets[0] = offsetof(Buffer, a);
   offsets[1] = offsetof(Buffer, b);
@@ -36,31 +32,31 @@ int main(int argc, char *argv[]) {
   MPI_Type_create_struct(3, blocklengths, offsets, types, &MPI_Buffer_type);
   MPI_Type_commit(&MPI_Buffer_type);
 
-  if (rank == 0) {
-    buf->a = 1;
-    buf->b = 2;
-	buftwo->data[666666] = 666;
+  Buffer buf;
 
-    MPI_Isend(buf, 1, MPI_Buffer_type, 1, 0, MPI_COMM_WORLD, &request);
+  if (rank == 0) {
+    buf.a = 1;
+    buf.b = 2;
+
+    MPI_Isend(&buf, 1, MPI_Buffer_type, 1, 0, MPI_COMM_WORLD, &request);
 
     // "Accidentally" overwrite before completion
-	memcpy(buf, buftwo, sizeof(Buffer));
+    buf.data[666666] = 999;
 
     MPI_Wait(&request, MPI_STATUS_IGNORE);
     printf("Sent potentially corrupted struct.\n");
   } else if (rank == 1) {
-    MPI_Irecv(buf, 1, MPI_Buffer_type, 0, 0, MPI_COMM_WORLD, &request);
+    MPI_Irecv(&buf, 1, MPI_Buffer_type, 0, 0, MPI_COMM_WORLD, &request);
 
     MPI_Wait(&request, MPI_STATUS_IGNORE);
-    printf("Received a: %d\n", buf->a);
-    printf("Received b: %d\n", buf->b);
-    printf("Received data[666666]: %d\n", buf->data[666666]);
+    printf("Received a: %d\n", buf.a);
+    printf("Received b: %d\n", buf.b);
+    printf("Received data[666666]: %d\n", buf.data[666666]);
   }
 
   printf("Bye.\n");
 
   MPI_Type_free(&MPI_Buffer_type);
-  free(buf);
   MPI_Finalize();
   return 0;
 }

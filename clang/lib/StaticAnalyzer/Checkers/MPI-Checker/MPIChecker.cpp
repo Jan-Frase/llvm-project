@@ -161,34 +161,40 @@ void MPIChecker::checkMissingWaits(SymbolReaper &SymReaper,
 void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx) const {
   // For every currently known async operation...
-  for (const auto &[RqstRegion, Rqst] : Ctx.getState()->get<RequestMap>()) {
+  auto map = Ctx.getState()->get<RequestMap>();
+  for (const auto &[RqstRegion, Rqst] : map) {
+    auto MsgRegion = Rqst.Msg.MsgLoc.getAsRegion();
+    auto AccessRegion = AccessLoc.getAsRegion();
     // ... if the request is in the sending phase -> no error ...
-    if (Rqst.RqstState== Request::Wait) continue;
+    if (Rqst.RqstState == Request::Wait) continue;
 
     // ... if it's an unlocked buffer -> no error ...'
     if (Rqst.Msg.MsgState == Message::Unlocked) continue;
 
-    // ... if it's a read in a write-frozen buffer -> no error ...
+    // ... if it's a read in a write-locked buffer -> no error ...
     if (IsLoad && Rqst.Msg.MsgState == Message::WriteLocked) continue;
 
     // ... if it's not in the same base region -> no error ...
-    if (Rqst.Msg.MsgRegion.getAsRegion()->getBaseRegion() != AccessLoc.getAsRegion()->getBaseRegion())
-      return;
+    if (MsgRegion->getBaseRegion() != AccessRegion->getBaseRegion())
+      continue;
 
     // ... if it's in the same region -> report error.
-    if (Rqst.Msg.MsgRegion.getAsRegion() == AccessLoc.getAsRegion()) {
-      auto ErrorNode = Ctx.generateNonFatalErrorNode();
+    if (MsgRegion == AccessRegion) {
+      const auto *ErrorNode = Ctx.generateNonFatalErrorNode();
       BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
       continue;
     }
 
     // Array handling:
-    if (Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>() && AccessLoc.getAsRegion()->getAs<ElementRegion>()) {
+    // TODO: Check if both have the same super region, ie are in the same array.
+    if (MsgRegion->getAs<ElementRegion>() && AccessRegion->getAs<ElementRegion>()
+      && MsgRegion->castAs<ElementRegion>()->getSuperRegion() == AccessRegion->castAs<ElementRegion>()->getSuperRegion()) {
       checkArrayAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion);
       continue;
     }
 
-    if (AccessLoc.getAsRegion()->isSubRegionOf(Rqst.Msg.MsgRegion.getAsRegion())) {
+    // Compound types:
+    if (AccessRegion->isSubRegionOf(MsgRegion)) {
       auto ErrorNode = Ctx.generateNonFatalErrorNode();
       BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
     }
@@ -197,18 +203,18 @@ void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt
 
 void MPIChecker::checkArrayAccess(const SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
                                    CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion) const {
-  const auto StartIndex = Rqst.Msg.MsgRegion.getAsRegion()->getAs<ElementRegion>()->getIndex();
+  const auto StartIndex = Rqst.Msg.MsgLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
   const auto EndIndex = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Add, StartIndex, Rqst.Msg.MsgCount.castAs<NonLoc>(), StartIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
   const auto AccessIndex = AccessLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
 
   const auto IsAfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
   const auto IsBeforeEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, AccessIndex, EndIndex, Ctx.getSValBuilder().getConditionType());
 
-  const auto IsInside = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, IsAfterStart.castAs<NonLoc>(), IsBeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
+  const auto IsInbetween = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, IsAfterStart.castAs<NonLoc>(), IsBeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
 
-  if (!IsInside.isConstant()) return;
+  if (!IsInbetween.isConstant()) return;
 
-  if (const auto S1 = Ctx.getState()->assume(IsInside.castAs<DefinedSVal>(), true)) {
+  if (const auto S1 = Ctx.getState()->assume(IsInbetween.castAs<DefinedSVal>(), true)) {
     auto ErrorNode = Ctx.generateNonFatalErrorNode(S1);
     BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
   }

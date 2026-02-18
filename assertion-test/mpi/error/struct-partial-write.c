@@ -4,8 +4,8 @@
 #include <stddef.h>
 
 typedef struct {
-  int a;
-  int b;
+  float a;
+  float b;
   int data[1000000];
 } Buffer;
 
@@ -23,9 +23,9 @@ int main(int argc, char *argv[]) {
   // Create MPI datatype for Buffer
   MPI_Datatype MPI_Buffer_type;
 
-  int blocklengths[3] = {1, 1, 1000000};
+  int blocklengths[3] = {1, 1, 1};
   MPI_Aint offsets[3];
-  MPI_Datatype types[3] = {MPI_INT, MPI_INT, MPI_INT};
+  MPI_Datatype types[3] = {MPI_INT, MPI_FLOAT, MPI_INT};
 
   offsets[0] = offsetof(Buffer, a);
   offsets[1] = offsetof(Buffer, b);
@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     MPI_Isend(buf, 1, MPI_Buffer_type, 1, 0, MPI_COMM_WORLD, &request);
 
     // "Accidentally" overwrite before completion
-    buf->a = 999;
+    buf->data[666666] = 999;
 
     MPI_Wait(&request, MPI_STATUS_IGNORE);
     printf("Sent potentially corrupted struct.\n");
