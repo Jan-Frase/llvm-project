@@ -82,7 +82,7 @@ public:
                                    CheckerContext &Ctx) const;
 
   void checkArrayAccess(SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion) const;
+                                   CheckerContext &Ctx, const Request &Rqst, const Message &Msg, const MemRegion *const RqstRegion) const;
 
 private:
   /// Collects all memory regions of a request(array) used by a wait

@@ -42,30 +42,30 @@ public:
           MsgCount == ToCompare.MsgCount;
   }
 
-  const MessageState MsgState;
-  const SVal MsgLoc;
-  const SVal MsgCount;
-  const SourceRange LockSourceRange;
+  MessageState MsgState;
+  SVal MsgLoc;
+  SVal MsgCount;
+  SourceRange LockSourceRange;
 };
 
 class Request {
 public:
   enum RequestState : unsigned char { Nonblocking, Wait };
 
-  Request(const RequestState RS, const Message &Msg) : RqstState{RS}, Msg{Msg} {}
-  Request(const RequestState RS) : RqstState{RS}, Msg(Message(Message::Unlocked, SVal(), SVal(), SourceRange())) {}
+  Request(const RequestState RS) : RqstState{RS}, MsgVec() {}
 
   void Profile(llvm::FoldingSetNodeID &Id) const {
     Id.AddInteger(RqstState);
-    Id.Add(Msg);
+    Id.AddPointer(&MsgVec);
   }
 
   bool operator==(const Request &ToCompare) const {
-    return RqstState == ToCompare.RqstState && Msg == ToCompare.Msg;
+    return RqstState == ToCompare.RqstState && MsgVec == ToCompare.MsgVec;
   }
 
+
   const RequestState RqstState;
-  const Message Msg;
+  SmallVector<Message, 2> MsgVec;
 };
 
 // The RequestMap stores MPI requests which are identified by their memory

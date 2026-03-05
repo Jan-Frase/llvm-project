@@ -89,7 +89,7 @@ void MPIBugReporter::reportUnsafeBufferAccess(const SVal AccessLoc, bool IsLoad,
 
   auto Report = std::make_unique<PathSensitiveBugReport>(UnsafeBufferAccessBugType, ErrorText, ExlNode);
   Report->addRange(Stmt->getSourceRange());
-  Report->addRange(Rqst.Msg.LockSourceRange);
+  Report->addRange(Rqst.MsgVec.front().LockSourceRange);
 
   BReporter.emitReport(std::move(Report));
 }

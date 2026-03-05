@@ -50,6 +50,13 @@ public:
   bool isWriteLocking(const IdentifierInfo *const IdentInfo) const;
   bool isFullLocking(const IdentifierInfo *const IdentInfo) const;
 
+  int getWriteLockedBufferIndex(const IdentifierInfo *const IdentInfo) const;
+  int getFullLockedBufferIndex(const IdentifierInfo *const IdentInfo) const;
+
+  int getWriteLockedCountIndex(const IdentifierInfo *const IdentInfo) const;
+  int getFullLockedCountIndex(const IdentifierInfo *const IdentInfo) const;
+
+
 private:
   // Initializes function identifiers, to recognize them during analysis.
   void identifierInit(ASTContext &ASTCtx);

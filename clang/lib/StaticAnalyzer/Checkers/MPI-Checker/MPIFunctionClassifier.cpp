@@ -283,12 +283,57 @@ bool MPIFunctionClassifier::isWriteLocking(const IdentifierInfo *const IdentInfo
   return IdentInfo == IdentInfo_MPI_Isend ||
           IdentInfo == IdentInfo_MPI_Issend ||
           IdentInfo == IdentInfo_MPI_Ibsend ||
-          IdentInfo == IdentInfo_MPI_Irsend;
+          IdentInfo == IdentInfo_MPI_Irsend ||
+          IdentInfo == IdentInfo_MPI_Iallgather ||
+          IdentInfo == IdentInfo_MPI_Iallreduce ||
+          IdentInfo == IdentInfo_MPI_Ibcast ||
+          IdentInfo == IdentInfo_MPI_Igather ||
+          IdentInfo == IdentInfo_MPI_Ireduce;
 }
 
 bool MPIFunctionClassifier::isFullLocking(const IdentifierInfo *const IdentInfo) const {
-  return IdentInfo == IdentInfo_MPI_Irecv;
+  return IdentInfo == IdentInfo_MPI_Irecv ||
+      IdentInfo == IdentInfo_MPI_Iscatter ||
+      IdentInfo == IdentInfo_MPI_Iallreduce ||
+      IdentInfo == IdentInfo_MPI_Iallgather;
 }
+
+int MPIFunctionClassifier::getWriteLockedBufferIndex(const IdentifierInfo *const IdentInfo) const {
+  return 0;
+}
+
+int MPIFunctionClassifier::getFullLockedBufferIndex(const IdentifierInfo *const IdentInfo) const {
+  if (IdentInfo == IdentInfo_MPI_Iscatter || IdentInfo == IdentInfo_MPI_Iallgather) {
+    return 3;
+  }
+
+  if (IdentInfo == IdentInfo_MPI_Iallreduce) {
+    return 1;
+  }
+
+  return 0;
+}
+
+int MPIFunctionClassifier::getWriteLockedCountIndex(const IdentifierInfo *const IdentInfo) const {
+  if (IdentInfo == IdentInfo_MPI_Iallreduce | IdentInfo == IdentInfo_MPI_Ireduce) {
+    return 2;
+  }
+
+  return 1;
+}
+
+int MPIFunctionClassifier::getFullLockedCountIndex(const IdentifierInfo *const IdentInfo) const {
+  if (IdentInfo == IdentInfo_MPI_Iscatter || IdentInfo == IdentInfo_MPI_Iallgather) {
+    return 4;
+  }
+
+  if (IdentInfo == IdentInfo_MPI_Iallreduce) {
+    return 2;
+  }
+
+  return 1;
+}
+
 
 } // end of namespace: mpi
 } // end of namespace: ento

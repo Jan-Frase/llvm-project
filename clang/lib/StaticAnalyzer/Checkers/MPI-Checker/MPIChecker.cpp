@@ -56,29 +56,32 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
   const bool isFullLocking = FuncClassifier->isFullLocking(PreCallEvent.getCalleeIdentifier());
   const bool isWriteLocking = FuncClassifier->isWriteLocking(PreCallEvent.getCalleeIdentifier());
 
-  Message::MessageState msgState;
+  auto NewReq = Request(Request::RequestState::Nonblocking);
   if (isFullLocking) {
-    msgState = Message::MessageState::FullLocked;
-  } else if (isWriteLocking) {
-    msgState = Message::MessageState::WriteLocked;
-  } else {
-    msgState = Message::MessageState::Unlocked;
+    const auto BufIndex = FuncClassifier->getFullLockedBufferIndex(PreCallEvent.getCalleeIdentifier());
+    const auto CountIdx = FuncClassifier->getFullLockedCountIndex(PreCallEvent.getCalleeIdentifier());
+
+    const auto Buf = PreCallEvent.getArgSVal(BufIndex);
+    const auto Count = PreCallEvent.getArgSVal(CountIdx);
+
+    if (!Buf.isUnknownOrUndef() && !Count.isUnknownOrUndef()) {
+      Message Msg(Message::MessageState::FullLocked, Buf, Count, PreCallEvent.getSourceRange());
+      NewReq.MsgVec.push_back(Msg);
+    }
+  } if (isWriteLocking) {
+    const auto BufIndex = FuncClassifier->getWriteLockedBufferIndex(PreCallEvent.getCalleeIdentifier());
+    const auto CountIdx = FuncClassifier->getWriteLockedCountIndex(PreCallEvent.getCalleeIdentifier());
+
+    const auto Buf = PreCallEvent.getArgSVal(BufIndex);
+    const auto Count = PreCallEvent.getArgSVal(CountIdx);
+
+    if (!Buf.isUnknownOrUndef() && !Count.isUnknownOrUndef()) {
+      Message Msg(Message::MessageState::WriteLocked, Buf, Count, PreCallEvent.getSourceRange());
+      NewReq.MsgVec.push_back(Msg);
+    }
   }
 
-  // Extract arguments
-  SVal msgRegion = PreCallEvent.getArgSVal(0);
-  SVal msgCount = PreCallEvent.getArgSVal(1);
-
-  // Construct request
-  if (msgState == Message::MessageState::Unlocked ||
-      msgRegion.isUnknownOrUndef() || msgCount.isUnknownOrUndef()) {
-    auto NewReq = Request(Request::RequestState::Nonblocking);
-    State = State->set<RequestMap>(RequestRegion, NewReq);
-  } else {
-    Message message(msgState, msgRegion, msgCount, PreCallEvent.getSourceRange());
-    auto NewReq = Request(Request::RequestState::Nonblocking, message);
-    State = State->set<RequestMap>(RequestRegion, NewReq);
-  }
+  State = State->set<RequestMap>(RequestRegion, NewReq);
   Ctx.addTransition(State);
 }
 
@@ -163,48 +166,50 @@ void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt
   // For every currently known async operation...
   auto map = Ctx.getState()->get<RequestMap>();
   for (const auto &[RqstRegion, Rqst] : map) {
-    auto MsgRegion = Rqst.Msg.MsgLoc.getAsRegion();
-    auto AccessRegion = AccessLoc.getAsRegion();
-    // ... if the request is in the sending phase -> no error ...
-    if (Rqst.RqstState == Request::Wait) continue;
+    for (Message Msg : Rqst.MsgVec) {
+      auto MsgRegion = Msg.MsgLoc.getAsRegion();
+      auto AccessRegion = AccessLoc.getAsRegion();
+      // ... if the request is in the sending phase -> no error ...
+      if (Rqst.RqstState == Request::Wait) continue;
 
-    // ... if it's an unlocked buffer -> no error ...'
-    if (Rqst.Msg.MsgState == Message::Unlocked) continue;
+      // ... if it's an unlocked buffer -> no error ...'
+      if (Msg.MsgState == Message::Unlocked) continue;
 
-    // ... if it's a read in a write-locked buffer -> no error ...
-    if (IsLoad && Rqst.Msg.MsgState == Message::WriteLocked) continue;
+      // ... if it's a read in a write-locked buffer -> no error ...
+      if (IsLoad && Msg.MsgState == Message::WriteLocked) continue;
 
-    // ... if it's not in the same base region -> no error ...
-    if (MsgRegion->getBaseRegion() != AccessRegion->getBaseRegion())
-      continue;
+      // ... if it's not in the same base region -> no error ...
+      if (MsgRegion->getBaseRegion() != AccessRegion->getBaseRegion())
+        continue;
 
-    // ... if it's in the same region -> report error.
-    if (MsgRegion == AccessRegion) {
-      const auto *ErrorNode = Ctx.generateNonFatalErrorNode();
-      BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
-      continue;
-    }
+      // ... if it's in the same region -> report error.
+      if (MsgRegion == AccessRegion) {
+        const auto *ErrorNode = Ctx.generateNonFatalErrorNode();
+        BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+        continue;
+      }
 
-    // Array handling:
-    // TODO: Check if both have the same super region, ie are in the same array.
-    if (MsgRegion->getAs<ElementRegion>() && AccessRegion->getAs<ElementRegion>()
-      && MsgRegion->castAs<ElementRegion>()->getSuperRegion() == AccessRegion->castAs<ElementRegion>()->getSuperRegion()) {
-      checkArrayAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion);
-      continue;
-    }
+      // Array handling:
+      // TODO: Check if both have the same super region, ie are in the same array.
+      if (MsgRegion->getAs<ElementRegion>() && AccessRegion->getAs<ElementRegion>()
+        && MsgRegion->castAs<ElementRegion>()->getSuperRegion() == AccessRegion->castAs<ElementRegion>()->getSuperRegion()) {
+        checkArrayAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, Msg, RqstRegion);
+        continue;
+        }
 
-    // Compound types:
-    if (AccessRegion->isSubRegionOf(MsgRegion)) {
-      auto ErrorNode = Ctx.generateNonFatalErrorNode();
-      BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+      // Compound types:
+      if (AccessRegion->isSubRegionOf(MsgRegion)) {
+        auto ErrorNode = Ctx.generateNonFatalErrorNode();
+        BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+      }
     }
   }
 }
 
 void MPIChecker::checkArrayAccess(const SVal AccessLoc, bool IsLoad, const Stmt *Stmt,
-                                   CheckerContext &Ctx, const Request &Rqst, const MemRegion *const RqstRegion) const {
-  const auto StartIndex = Rqst.Msg.MsgLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
-  const auto EndIndex = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Add, StartIndex, Rqst.Msg.MsgCount.castAs<NonLoc>(), StartIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
+                                   CheckerContext &Ctx, const Request &Rqst, const Message &Msg, const MemRegion *const RqstRegion) const {
+  const auto StartIndex = Msg.MsgLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
+  const auto EndIndex = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_Add, StartIndex, Msg.MsgCount.castAs<NonLoc>(), StartIndex.getType(Ctx.getASTContext())).castAs<NonLoc>();
   const auto AccessIndex = AccessLoc.getAsRegion()->getAs<ElementRegion>()->getIndex();
 
   const auto IsAfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
