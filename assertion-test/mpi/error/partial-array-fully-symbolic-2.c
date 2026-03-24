@@ -19,6 +19,8 @@ void foo(int a, int b, int c) {
     return;
   if (b < 0 || b > 10)
     return;
+  if (c != 8)
+    return;
 
   // Sender
   if (rank == 0) {

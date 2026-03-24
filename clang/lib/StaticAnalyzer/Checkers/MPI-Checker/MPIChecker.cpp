@@ -25,8 +25,20 @@ namespace clang {
 namespace ento {
 namespace mpi {
 
+static bool isArray(SVal CountSVal) {
+  if (const auto *CountAPSInt= CountSVal.getAsInteger()) {
+    auto value = CountAPSInt->getExtValue();
+    if (value == 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
                                         CheckerContext &Ctx) const {
+  PreCallEvent.dump();
+  Ctx.getState()->dump();
   if (!FuncClassifier->isNonBlockingType(PreCallEvent.getCalleeIdentifier())) {
     return;
   }
@@ -67,6 +79,19 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
     if (!Buf.isUnknownOrUndef() && !Count.isUnknownOrUndef()) {
       Message Msg(Message::MessageState::FullLocked, Buf, Count, PreCallEvent.getSourceRange());
       NewReq.MsgVec.push_back(Msg);
+
+      /*
+      if (isArray(Count)) {
+        llvm::errs() << "JAN - Array: ";
+        Ctx.getLocation().dump();
+        llvm::errs() << '\n';
+      }
+      else {
+        llvm::errs() << "JAN - Other: ";
+        Ctx.getLocation().dump();
+        llvm::errs() << '\n';
+      }
+       */
     }
   } if (isWriteLocking) {
     const auto BufIndex = FuncClassifier->getWriteLockedBufferIndex(PreCallEvent.getCalleeIdentifier());
@@ -78,6 +103,19 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
     if (!Buf.isUnknownOrUndef() && !Count.isUnknownOrUndef()) {
       Message Msg(Message::MessageState::WriteLocked, Buf, Count, PreCallEvent.getSourceRange());
       NewReq.MsgVec.push_back(Msg);
+
+      /*
+      if (isArray(Count)) {
+        llvm::errs() << "JAN - Array: ";
+        Ctx.getLocation().dump();
+        llvm::errs() << '\n';
+      }
+      else {
+        llvm::errs() << "JAN - Other: ";
+        Ctx.getLocation().dump();
+        llvm::errs() << '\n';
+      }
+       */
     }
   }
 
@@ -169,6 +207,7 @@ void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt
     for (Message Msg : Rqst.MsgVec) {
       auto MsgRegion = Msg.MsgLoc.getAsRegion();
       auto AccessRegion = AccessLoc.getAsRegion();
+      // llvm::errs() << "UBA: Message Region Check Started.\n";
       // ... if the request is in the sending phase -> no error ...
       if (Rqst.RqstState == Request::Wait) continue;
 
@@ -182,23 +221,27 @@ void MPIChecker::checkUnsafeBufferAccess(SVal AccessLoc, bool IsLoad, const Stmt
       if (MsgRegion->getBaseRegion() != AccessRegion->getBaseRegion())
         continue;
 
+      // llvm::errs() << "UBA: Not immediately discarded.\n";
+
       // ... if it's in the same region -> report error.
       if (MsgRegion == AccessRegion) {
+        // llvm::errs() << "UBA: Same region error.\n";
         const auto *ErrorNode = Ctx.generateNonFatalErrorNode();
         BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
         continue;
       }
 
       // Array handling:
-      // TODO: Check if both have the same super region, ie are in the same array.
       if (MsgRegion->getAs<ElementRegion>() && AccessRegion->getAs<ElementRegion>()
         && MsgRegion->castAs<ElementRegion>()->getSuperRegion() == AccessRegion->castAs<ElementRegion>()->getSuperRegion()) {
+        // llvm::errs() << "UBA: Array check entered.\n";
         checkArrayAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, Msg, RqstRegion);
         continue;
-        }
+      }
 
       // Compound types:
       if (AccessRegion->isSubRegionOf(MsgRegion)) {
+        // llvm::errs() << "UBA: Subregion error.\n";
         auto ErrorNode = Ctx.generateNonFatalErrorNode();
         BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
       }
@@ -215,13 +258,17 @@ void MPIChecker::checkArrayAccess(const SVal AccessLoc, bool IsLoad, const Stmt 
   const auto IsAfterStart = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_GE, AccessIndex, StartIndex, Ctx.getSValBuilder().getConditionType());
   const auto IsBeforeEnd = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_LT, AccessIndex, EndIndex, Ctx.getSValBuilder().getConditionType());
 
-  const auto IsInbetween = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_EQ, IsAfterStart.castAs<NonLoc>(), IsBeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
+  const auto IsInbetween = Ctx.getSValBuilder().evalBinOpNN(Ctx.getState(), BO_And, IsAfterStart.castAs<NonLoc>(), IsBeforeEnd.castAs<NonLoc>(), Ctx.getSValBuilder().getConditionType());
 
-  if (!IsInbetween.isConstant()) return;
+  if (!IsInbetween.isConstant()) {
+    // llvm::errs() << "UBA: Array access is not constant.\n";
+    return;
+  }
 
   if (const auto S1 = Ctx.getState()->assume(IsInbetween.castAs<DefinedSVal>(), true)) {
     auto ErrorNode = Ctx.generateNonFatalErrorNode(S1);
     BReporter.reportUnsafeBufferAccess(AccessLoc, IsLoad, Stmt, Ctx, Rqst, RqstRegion, ErrorNode, Ctx.getBugReporter());
+    // llvm::errs() << "UBA: Array error!\n";
   }
 }
 
