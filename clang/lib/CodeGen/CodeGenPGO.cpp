@@ -50,8 +50,6 @@ void CodeGenPGO::setFuncName(StringRef Name,
 
 void CodeGenPGO::setFuncName(llvm::Function *Fn) {
   setFuncName(Fn->getName(), Fn->getLinkage());
-  // Create PGOFuncName meta data.
-  llvm::createPGOFuncNameMetadata(*Fn, FuncName);
 }
 
 /// The version of the PGO hash algorithm.
@@ -1505,7 +1503,7 @@ void CodeGenFunction::maybeCreateMCDCCondBitmap() {
     // Note: This doesn't initialize Addrs in invalidated Decisions.
     for (auto *MCDCCondBitmapAddr : PGO->getMCDCCondBitmapAddrArray(Builder))
       *MCDCCondBitmapAddr =
-          CreateIRTemp(getContext().UnsignedIntTy, "mcdc.addr");
+          CreateIRTempWithoutCast(getContext().UnsignedIntTy, "mcdc.addr");
   }
 }
 bool CodeGenFunction::isMCDCDecisionExpr(const Expr *E) const {

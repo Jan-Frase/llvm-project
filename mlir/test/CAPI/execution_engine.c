@@ -11,11 +11,13 @@
  */
 /* REQUIRES: host-supports-jit
  */
+// XFAIL: system-aix
 
 #include "mlir-c/Conversion.h"
 #include "mlir-c/ExecutionEngine.h"
 #include "mlir-c/IR.h"
 #include "mlir-c/RegisterEverything.h"
+#include "llvm-c/Support.h"
 
 #include <assert.h>
 #include <math.h>
@@ -137,6 +139,17 @@ void testOmpCreation(void) {
   mlirContextDestroy(ctx);
 }
 
+// The JIT reads the options that LLVMParseCommandLineOptions sets.
+// CHECK-LABEL: Running test 'testLibraryOptions'
+void testLibraryOptions(void) {
+  const char *argv[] = {"execution_engine", "-print-after-isel"};
+  LLVMParseCommandLineOptions(2, argv, "");
+  // Order the dump on stderr after the test label.
+  fflush(stdout);
+  // CHECK: # After Instruction Selection:
+  testSimpleExecution();
+}
+
 int main(void) {
 
 #define _STRINGIFY(x) #x
@@ -147,5 +160,6 @@ int main(void) {
 
   TEST(testSimpleExecution);
   TEST(testOmpCreation);
+  TEST(testLibraryOptions);
   return 0;
 }

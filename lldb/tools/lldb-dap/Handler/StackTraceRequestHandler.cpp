@@ -14,6 +14,7 @@
 #include "ProtocolUtils.h"
 #include "RequestHandler.h"
 #include "lldb/API/SBStream.h"
+#include "lldb/lldb-enumerations.h"
 
 using namespace lldb_dap;
 using namespace lldb_dap::protocol;
@@ -45,8 +46,9 @@ static StackFrame CreateStackFrame(DAP &dap, lldb::SBFrame &frame,
   }
 
   // We only include `[opt]` if a custom frame format is not specified.
-  if (!format && frame.GetFunction().GetIsOptimized())
-    stack_frame.name += " [opt]";
+  const bool is_optimized = frame.GetFunction().GetIsOptimized();
+  if (is_optimized)
+    stack_frame.isOptimized = true;
 
   std::optional<protocol::Source> source = dap.ResolveSource(frame);
   if (source && !IsAssemblySource(*source)) {
@@ -74,12 +76,18 @@ static StackFrame CreateStackFrame(DAP &dap, lldb::SBFrame &frame,
   stack_frame.source = std::move(source);
   stack_frame.instructionPointerReference = frame.GetPC();
 
-  if (frame.IsArtificial() || frame.IsHidden())
+  if (is_optimized || frame.IsArtificial() || frame.IsHidden())
     stack_frame.presentationHint = StackFrame::ePresentationHintSubtle;
+
   if (const lldb::SBModule module = frame.GetModule()) {
     if (llvm::StringRef uuid = module.GetUUIDString(); !uuid.empty())
       stack_frame.moduleId = uuid.str();
   }
+  if (const uint32_t cu_id = frame.GetCompileUnit().GetIDInModule();
+      cu_id != LLDB_INVALID_INDEX32)
+    stack_frame.compileUnitId = cu_id;
+  stack_frame.languageSpecificData =
+      GetStructuredDataAsJSON(frame.GetLanguageSpecificData());
 
   return stack_frame;
 }
@@ -189,6 +197,9 @@ static bool FillStackFrames(DAP &dap, lldb::SBThread &thread,
 
 llvm::Expected<protocol::StackTraceResponseBody>
 StackTraceRequestHandler::Run(const protocol::StackTraceArguments &args) const {
+  if (dap.ProcessIsNotStopped())
+    return llvm::make_error<NotStoppedError>();
+
   lldb::SBThread thread = dap.GetLLDBThread(args.threadId);
   if (!thread.IsValid())
     return llvm::make_error<DAPError>("invalid thread");

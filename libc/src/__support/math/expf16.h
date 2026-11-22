@@ -13,25 +13,22 @@
 
 #ifdef LIBC_TYPES_HAS_FLOAT16
 
-#include "hdr/errno_macros.h"
 #include "hdr/fenv_macros.h"
 #include "src/__support/FPUtil/FEnvImpl.h"
 #include "src/__support/FPUtil/FPBits.h"
-#include "src/__support/FPUtil/PolyEval.h"
 #include "src/__support/FPUtil/cast.h"
 #include "src/__support/FPUtil/except_value_utils.h"
-#include "src/__support/FPUtil/rounding_mode.h"
+#include "src/__support/FPUtil/polyeval.h"
 #include "src/__support/common.h"
 #include "src/__support/macros/config.h"
 #include "src/__support/macros/optimization.h"
-
-#include "expf16_utils.h"
+#include "src/__support/math/expf16_utils.h"
 
 namespace LIBC_NAMESPACE_DECL {
 
 namespace math {
 
-LIBC_INLINE static constexpr float16 expf16(float16 x) {
+LIBC_INLINE constexpr float16 expf16(float16 x) {
 #ifndef LIBC_MATH_HAS_SKIP_ACCURATE_PASS
   constexpr fputil::ExceptValues<float16, 2> EXPF16_EXCEPTS_LO = {{
       // (input, RZ output, RU offset, RD offset, RN offset)
@@ -76,15 +73,7 @@ LIBC_INLINE static constexpr float16 expf16(float16 x) {
       if (x_bits.is_inf())
         return FPBits::inf().get_val();
 
-      switch (fputil::quick_get_round()) {
-      case FE_TONEAREST:
-      case FE_UPWARD:
-        fputil::set_errno_if_required(ERANGE);
-        fputil::raise_except_if_required(FE_OVERFLOW);
-        return FPBits::inf().get_val();
-      default:
-        return FPBits::max_normal().get_val();
-      }
+      return fputil::set_overflow<float16>();
     }
 
     // When x <= -18.
@@ -93,15 +82,7 @@ LIBC_INLINE static constexpr float16 expf16(float16 x) {
       if (x_bits.is_inf())
         return FPBits::zero().get_val();
 
-      fputil::set_errno_if_required(ERANGE);
-      fputil::raise_except_if_required(FE_UNDERFLOW | FE_INEXACT);
-
-      switch (fputil::quick_get_round()) {
-      case FE_UPWARD:
-        return FPBits::min_subnormal().get_val();
-      default:
-        return FPBits::zero().get_val();
-      }
+      return fputil::set_underflow<float16>();
     }
 
     // When 0 < |x| <= 2^(-5).

@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=amdgcn--amdpal -mcpu=gfx950 <%s | FileCheck %s --check-prefixes=CHECK
+; RUN: llc -mtriple=amdgpu9.50--amdpal <%s | FileCheck %s --check-prefixes=CHECK
 
 ; CHECK-LABEL: {{^}}_amdgpu_cs_main:
 ; CHECK: ; TotalNumSgprs: 6
@@ -52,6 +52,7 @@
 ; CHECK-NEXT:    .hardware_stages:
 ; CHECK-NEXT:      .cs:
 ; CHECK-NEXT:	     .agpr_count:     0
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .checksum_value: 0x9444d7d0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_cs
@@ -112,6 +113,7 @@
 ; CHECK-NEXT:        .wgp_mode:       false
 ; CHECK-NEXT:      .gs:
 ; CHECK-NEXT:        .agpr_count:     0
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_gs
 ; CHECK-NEXT:        .entry_point_symbol:    gs_shader
@@ -126,12 +128,13 @@
 ; CHECK-NEXT:        .wgp_mode:       false
 ; CHECK-NEXT:      .hs:
 ; CHECK-NEXT:        .agpr_count:     0
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_hs
 ; CHECK-NEXT:        .entry_point_symbol:    hs_shader
 ; CHECK-NEXT:        .forward_progress: false
 ; CHECK-NEXT:        .ieee_mode:      false
-; CHECK-NEXT:        .lds_size:       0xa00
+; CHECK-NEXT:        .lds_size:       0x1400
 ; CHECK-NEXT:        .mem_ordered:    false
 ; CHECK-NEXT:        .scratch_en:     false
 ; CHECK-NEXT:        .scratch_memory_size: 0
@@ -140,6 +143,7 @@
 ; CHECK-NEXT:        .wgp_mode:       false
 ; CHECK-NEXT:      .ps:
 ; CHECK-NEXT:        .agpr_count:     0
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_ps
 ; CHECK-NEXT:        .entry_point_symbol:    ps_shader
@@ -207,7 +211,7 @@ declare i64 @llvm.amdgcn.s.getpc() #2
 ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(write)
 declare void @llvm.amdgcn.raw.buffer.store.i32(i32, <4 x i32>, i32, i32, i32 immarg) #3
 
-attributes #0 = { nounwind memory(readwrite) "amdgpu-flat-work-group-size"="1024,1024" "amdgpu-memory-bound"="false" "amdgpu-unroll-threshold"="700" "amdgpu-wave-limiter"="false" "amdgpu-work-group-info-arg-no"="4" "denormal-fp-math-f32"="preserve-sign" }
+attributes #0 = { nounwind memory(readwrite) "amdgpu-flat-work-group-size"="1024,1024" "amdgpu-memory-bound"="false" "amdgpu-unroll-threshold"="700" "amdgpu-wave-limiter"="false" "amdgpu-work-group-info-arg-no"="4" denormal_fpenv(float: preservesign) }
 
 attributes #1 = { nounwind memory(readwrite) "InitialPSInputAddr"="36983" }
 

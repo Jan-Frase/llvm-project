@@ -85,6 +85,9 @@ public:
     defCls.writeDefTo(os);
   }
 
+  /// Returns the headers that need to be included for the class to parse.
+  ArrayRef<StringRef> getRequiredIncludes() const { return requiredIncludes; }
+
 private:
   /// Add traits from the TableGen definition to the class.
   void createParentWithTraits();
@@ -183,6 +186,9 @@ private:
 
   /// The set of using declarations for trait methods.
   llvm::StringSet<> interfaceUsingNames;
+
+  /// The headers required by the class.
+  SmallVector<StringRef> requiredIncludes;
 };
 } // namespace
 
@@ -190,10 +196,13 @@ DefGen::DefGen(const AttrOrTypeDef &def)
     : def(def), params(def.getParameters()), defCls(def.getCppClassName()),
       valueType(isa<AttrDef>(def) ? "Attribute" : "Type"),
       defType(isa<AttrDef>(def) ? "Attr" : "Type") {
-  // Check that all parameters have names.
-  for (const AttrOrTypeParameter &param : def.getParameters())
+  // Check that all parameters have names and record the headers declaring
+  // their types.
+  for (const AttrOrTypeParameter &param : def.getParameters()) {
     if (param.isAnonymous())
       llvm::PrintFatalError("all parameters must have a name");
+    llvm::append_range(requiredIncludes, param.getCppIncludes());
+  }
 
   // If a storage class is needed, create one.
   if (def.getNumParameters() > 0)
@@ -246,12 +255,17 @@ void DefGen::createParentWithTraits() {
                                  ? strfmt("{0}::{1}", def.getStorageNamespace(),
                                           def.getStorageClassName())
                                  : strfmt("::mlir::{0}Storage", valueType));
-  SmallVector<std::string> traitNames =
-      llvm::map_to_vector(def.getTraits(), [](auto &trait) {
-        return isa<NativeTrait>(&trait)
-                   ? cast<NativeTrait>(&trait)->getFullyQualifiedTraitName()
-                   : cast<InterfaceTrait>(&trait)->getFullyQualifiedTraitName();
-      });
+  SmallVector<std::string> traitNames;
+  for (auto &trait : def.getTraits()) {
+    // Skip PredTrait as it doesn't generate a C++ trait class.
+    if (isa<PredTrait>(&trait))
+      continue;
+    traitNames.push_back(
+        isa<NativeTrait>(&trait)
+            ? cast<NativeTrait>(&trait)->getFullyQualifiedTraitName()
+            : cast<InterfaceTrait>(&trait)->getFullyQualifiedTraitName());
+    llvm::append_range(requiredIncludes, trait.getCppIncludes());
+  }
   for (auto &traitName : traitNames)
     defParent.addTemplateParam(traitName);
 
@@ -262,6 +276,12 @@ void DefGen::createParentWithTraits() {
   if (def.genMnemonicAlias() &&
       !llvm::is_contained(traitNames, opAsmInterfaceTraitName)) {
     defParent.addTemplateParam(opAsmInterfaceTraitName);
+    // `OpAsmAttrInterface` and `OpAsmTypeInterface` are declared in
+    // `BuiltinAttributeInterfaces.h` and `BuiltinTypeInterfaces.h`
+    // respectively.
+    requiredIncludes.push_back(isa<AttrDef>(def)
+                                   ? "mlir/IR/BuiltinAttributeInterfaces.h"
+                                   : "mlir/IR/BuiltinTypeInterfaces.h");
   }
   defCls.addParent(std::move(defParent));
 }
@@ -386,6 +406,26 @@ void DefGen::emitInvariantsVerifierImpl() {
                                 param.getName(), constraint->getSummary())
                      << "\n";
   }
+  {
+    // Generate verification for PredTraits.
+    FmtContext traitCtx;
+    for (auto it : llvm::enumerate(def.getParameters())) {
+      // Note: Skip over the first method parameter (`emitError`).
+      traitCtx.addSubst(it.value().getName(),
+                        builderParams[it.index() + 1].getName());
+    }
+    for (const Trait &trait : def.getTraits()) {
+      if (auto *t = dyn_cast<PredTrait>(&trait)) {
+        verifier->body() << tgfmt(
+            "if (!($0)) {\n"
+            "  emitError() << \"failed to verify that $1\";\n"
+            "  return ::mlir::failure();\n"
+            "}\n",
+            &traitCtx, tgfmt(t->getPredTemplate(), &traitCtx), t->getSummary());
+      }
+    }
+  }
+
   verifier->body() << "return ::mlir::success();";
 }
 
@@ -872,27 +912,39 @@ bool DefGenerator::emitDecls(StringRef selectedDialect) {
   emitSourceFileHeader((defType + "Def Declarations").str(), os);
   llvm::IfDefEmitter scope(os, "GET_" + defType.upper() + "DEF_CLASSES");
 
-  // Output the common "header".
-  os << typeDefDeclHeader;
-
   SmallVector<AttrOrTypeDef, 16> defs;
   collectAllDefs(selectedDialect, defRecords, defs);
-  if (defs.empty())
-    return false;
-  {
-    DialectNamespaceEmitter nsEmitter(os, defs.front().getDialect());
+
+  // The required includes are only known once all declarations were
+  // generated, so buffer the declarations until the includes are emitted.
+  SmallVector<StringRef> includes;
+  std::string declarations;
+  llvm::raw_string_ostream declOs(declarations);
+  if (!defs.empty()) {
+    includes.push_back(isAttrGenerator ? "mlir/IR/Attributes.h"
+                                       : "mlir/IR/Types.h");
+    DialectNamespaceEmitter nsEmitter(declOs, defs.front().getDialect());
 
     // Declare all the def classes first (in case they reference each other).
     for (const AttrOrTypeDef &def : defs) {
-      tblgen::emitSummaryAndDescComments(os, def.getSummary(),
+      tblgen::emitSummaryAndDescComments(declOs, def.getSummary(),
                                          def.getDescription());
-      os << "class " << def.getCppClassName() << ";\n";
+      declOs << "class " << def.getCppClassName() << ";\n";
     }
 
     // Emit the declarations.
-    for (const AttrOrTypeDef &def : defs)
-      DefGen(def).emitDecl(os);
+    for (const AttrOrTypeDef &def : defs) {
+      DefGen gen(def);
+      gen.emitDecl(declOs);
+      llvm::append_range(includes, gen.getRequiredIncludes());
+    }
   }
+  tblgen::emitIncludes(os, includes);
+
+  // Output the common "header".
+  os << typeDefDeclHeader;
+  os << declarations;
+
   // Emit the TypeID explicit specializations to have a single definition for
   // each of these.
   for (const AttrOrTypeDef &def : defs)
@@ -1015,6 +1067,38 @@ static const char *const dialectDynamicTypePrinterDispatch = R"(
     return;
 )";
 
+/// Checks whether a declarative assembly format string needs a leading space
+/// between the mnemonic and the format body in the generated printer.
+///
+/// Returns false for formats starting with punctuation or a space-eraser
+/// directive that should attach directly to the mnemonic (e.g., `<`, `(`,
+/// ``).
+///
+/// This inspects the raw format string rather than parsing it into a DefFormat.
+/// Parsing would require access to the format element types (which are local to
+/// `AttrOrTypeFormatGen.cpp`) and would re-parse every format string just to
+/// check its first token -- an overkill for a simple spacing heuristic.
+/// The only case this cannot distinguish structurally is an optional group
+/// whose then-branch starts with punctuation, but parsing has the same
+/// limitation since the group's anchor is not known at codegen time.
+static bool needsLeadingSpace(const AttrOrTypeDef &def) {
+  StringRef fmtStr = def.getAssemblyFormat()->trim();
+  if (fmtStr.empty())
+    return false;
+
+  // '(' starts an optional group.
+  if (fmtStr.front() == '(')
+    return false;
+
+  if (fmtStr.front() != '`' || fmtStr.size() < 2)
+    return true;
+
+  // Backtick-quoted literals (e.g., `<`, `{`, `[`) or space-eraser (``) -- no
+  // leading space. Bare '<', '{', '[' cannot appear at position 0 of a valid
+  // format.
+  return !llvm::is_contained("<{([`", fmtStr[1]);
+}
+
 /// Emit the dialect printer/parser dispatcher. User's code should call these
 /// functions from their dialect's print/parse methods.
 void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
@@ -1039,10 +1123,12 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
                   {"::mlir::AsmPrinter &", "printer"}});
 
   // The parser dispatch uses a KeywordSwitch, matching on the mnemonic and
-  // calling the def's parse function.
+  // calling the def's parse function. The KeywordSwitch only parses the
+  // mnemonic if `*mnemonic` is empty, so that callers can continue with a
+  // mnemonic they already parsed, e.g. in another dispatch function.
   parse.body() << "  return "
                   "::mlir::AsmParser::KeywordSwitch<::mlir::"
-                  "OptionalParseResult>(parser)\n";
+                  "OptionalParseResult>(parser, mnemonic)\n";
   const char *const getValueForMnemonic =
       R"(    .Case({0}::getMnemonic(), [&](llvm::StringRef, llvm::SMLoc) {{
       value = {0}::{1};
@@ -1059,9 +1145,10 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
       return ::mlir::success();
     })
 )";
-  for (auto &def : defs) {
+  for (const AttrOrTypeDef &def : defs) {
     if (!def.getMnemonic())
       continue;
+
     bool hasParserPrinterDecl =
         def.hasCustomAssemblyFormat() || def.getAssemblyFormat();
     std::string defClass = strfmt(
@@ -1075,9 +1162,24 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
     parse.body() << llvm::formatv(getValueForMnemonic, defClass, parseOrGet);
 
     // If the def has no parameters and no printer, just print the mnemonic.
-    StringRef printDef = "";
-    if (hasParserPrinterDecl)
-      printDef = "\nt.print(printer);";
+    if (!hasParserPrinterDecl) {
+      printer.body() << llvm::formatv(printValue, defClass, "");
+      continue;
+    }
+
+    // Custom format: `print()` controls its own spacing.
+    if (def.hasCustomAssemblyFormat()) {
+      printer.body() << llvm::formatv(printValue, defClass,
+                                      "\nt.print(printer);");
+      continue;
+    }
+
+    // Declarative format: because `print()` doesn't emit a leading space,
+    // add one here unless the format starts with punctuation or a
+    // space-eraser directive that should attach directly to the mnemonic.
+    StringRef printDef = needsLeadingSpace(def)
+                             ? "\nprinter << ' ';\nt.print(printer);"
+                             : "\nt.print(printer);";
     printer.body() << llvm::formatv(printValue, defClass, printDef);
   }
   parse.body() << "    .Default([&](llvm::StringRef keyword, llvm::SMLoc) {\n"
@@ -1091,6 +1193,21 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
   printer.writeDeclTo(indentedOs);
 }
 
+/// Headers declaring the C++ constructs used by every generated attribute or
+/// type definition, beyond those already included by the declarations.
+static constexpr StringRef attrOrTypeDefIncludes[] = {
+    // `::llvm::TypeSwitch`.
+    "llvm/ADT/TypeSwitch.h",
+    // `::mlir::Builder`.
+    "mlir/IR/Builders.h",
+    // `::mlir::DialectAsmParser`, `::mlir::DialectAsmPrinter`,
+    // `::mlir::FieldParser`.
+    "mlir/IR/DialectImplementation.h",
+    // `::mlir::AsmParser`, `::mlir::AsmParser::KeywordSwitch`,
+    // `::mlir::AsmPrinter`.
+    "mlir/IR/OpImplementation.h",
+};
+
 bool DefGenerator::emitDefs(StringRef selectedDialect) {
   emitSourceFileHeader((defType + "Def Definitions").str(), os);
 
@@ -1101,6 +1218,7 @@ bool DefGenerator::emitDefs(StringRef selectedDialect) {
   emitTypeDefList(defs);
 
   llvm::IfDefEmitter scope(os, "GET_" + defType.upper() + "DEF_CLASSES");
+  tblgen::emitIncludes(os, attrOrTypeDefIncludes);
   emitParsePrintDispatch(defs);
   for (const AttrOrTypeDef &def : defs) {
     {

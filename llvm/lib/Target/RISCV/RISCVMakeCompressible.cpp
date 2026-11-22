@@ -67,9 +67,14 @@
 
 #include "RISCV.h"
 #include "RISCVSubtarget.h"
+#include "llvm/CodeGen/MachineFunctionAnalysisManager.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachinePassManager.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/RegisterScavenging.h"
+#include "llvm/IR/Analysis.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 
 using namespace llvm;
@@ -79,19 +84,24 @@ using namespace llvm;
 
 namespace {
 
-struct RISCVMakeCompressibleOpt : public MachineFunctionPass {
+struct RISCVMakeCompressibleLegacy : public MachineFunctionPass {
   static char ID;
 
   bool runOnMachineFunction(MachineFunction &Fn) override;
 
-  RISCVMakeCompressibleOpt() : MachineFunctionPass(ID) {}
+  RISCVMakeCompressibleLegacy() : MachineFunctionPass(ID) {}
 
   StringRef getPassName() const override { return RISCV_COMPRESS_INSTRS_NAME; }
+
+  void getAnalysisUsage(AnalysisUsage &AU) const override {
+    AU.setPreservesCFG();
+    MachineFunctionPass::getAnalysisUsage(AU);
+  }
 };
 } // namespace
 
-char RISCVMakeCompressibleOpt::ID = 0;
-INITIALIZE_PASS(RISCVMakeCompressibleOpt, "riscv-make-compressible",
+char RISCVMakeCompressibleLegacy::ID = 0;
+INITIALIZE_PASS(RISCVMakeCompressibleLegacy, "riscv-make-compressible",
                 RISCV_COMPRESS_INSTRS_NAME, false, false)
 
 // Return log2(widthInBytes) of load/store done by Opcode.
@@ -225,9 +235,9 @@ static bool isCompressibleLoad(const MachineInstr &MI) {
   case RISCV::LD_RV32:
     return STI.hasStdExtZclsd();
   case RISCV::FLW:
-    return !STI.is64Bit() && STI.hasStdExtCOrZcfOrZce();
+    return !STI.is64Bit() && STI.hasStdExtZcf();
   case RISCV::FLD:
-    return STI.hasStdExtCOrZcd();
+    return STI.hasStdExtZcd();
   // For the Xqcilo loads we mark it as compressible only if Xqcilia is also
   // enabled so that QC_E_ADDI can be used to create the new base.
   case RISCV::QC_E_LBU:
@@ -258,9 +268,9 @@ static bool isCompressibleStore(const MachineInstr &MI) {
   case RISCV::SD_RV32:
     return STI.hasStdExtZclsd();
   case RISCV::FSW:
-    return !STI.is64Bit() && STI.hasStdExtCOrZcfOrZce();
+    return !STI.is64Bit() && STI.hasStdExtZcf();
   case RISCV::FSD:
-    return STI.hasStdExtCOrZcd();
+    return STI.hasStdExtZcd();
   // For the Xqcilo stores we mark it as compressible only if Xqcilia is also
   // enabled so that QC_E_ADDI can be used to create the new base.
   case RISCV::QC_E_SB:
@@ -468,9 +478,9 @@ static void updateOperands(MachineInstr &MI, RegImmPair OldRegImm,
   MOImm.setImm(NewOffset);
 }
 
-bool RISCVMakeCompressibleOpt::runOnMachineFunction(MachineFunction &Fn) {
+static bool runMakeCompressibleOpt(MachineFunction &Fn) {
   // This is a size optimization.
-  if (skipFunction(Fn.getFunction()) || !Fn.getFunction().hasMinSize())
+  if (!Fn.getFunction().hasOptSize())
     return false;
 
   const RISCVSubtarget &STI = Fn.getSubtarget<RISCVSubtarget>();
@@ -528,6 +538,20 @@ bool RISCVMakeCompressibleOpt::runOnMachineFunction(MachineFunction &Fn) {
 }
 
 /// Returns an instance of the Make Compressible Optimization pass.
-FunctionPass *llvm::createRISCVMakeCompressibleOptPass() {
-  return new RISCVMakeCompressibleOpt();
+FunctionPass *llvm::createRISCVMakeCompressibleLegacyPass() {
+  return new RISCVMakeCompressibleLegacy();
+}
+
+bool RISCVMakeCompressibleLegacy::runOnMachineFunction(MachineFunction &MF) {
+  if (skipFunction(MF.getFunction()))
+    return false;
+  return runMakeCompressibleOpt(MF);
+}
+
+PreservedAnalyses
+RISCVMakeCompressiblePass::run(MachineFunction &MF,
+                               MachineFunctionAnalysisManager &MFAM) {
+  return runMakeCompressibleOpt(MF) ? getMachineFunctionPassPreservedAnalyses()
+                                          .preserveSet<CFGAnalyses>()
+                                    : PreservedAnalyses::all();
 }

@@ -30,7 +30,7 @@ using fputil::FloatFloat;
 //     b = round(atan(i/16) - a, SG, RN);
 //     print("{", b, ",", a, "},");
 //   };
-static constexpr FloatFloat ATAN_I[17] = {
+LIBC_INLINE_VAR constexpr FloatFloat ATAN_I[17] = {
     {0.0f, 0.0f},
     {-0x1.1a6042p-30f, 0x1.ff55bcp-5f},
     {-0x1.54f424p-30f, 0x1.fd5baap-4f},
@@ -55,7 +55,7 @@ static constexpr FloatFloat ATAN_I[17] = {
 //     a = round(1 / (1 + (i/16)^2), SG, RN);
 //     print(a, ",");
 //   };
-static constexpr float ATANF_REDUCED_ARG[17] = {
+LIBC_INLINE_VAR constexpr float ATANF_REDUCED_ARG[17] = {
     0x1.0p0f,       0x1.fe01fep-1f, 0x1.f81f82p-1f, 0x1.ee9c8p-1f,
     0x1.e1e1e2p-1f, 0x1.d272cap-1f, 0x1.c0e07p-1f,  0x1.adbe88p-1f,
     0x1.99999ap-1f, 0x1.84f00cp-1f, 0x1.702e06p-1f, 0x1.5babccp-1f,
@@ -66,16 +66,16 @@ static constexpr float ATANF_REDUCED_ARG[17] = {
 // Approximating atan( u / (1 + u * k/16) )
 //   atan( u / (1 + u * k/16) ) / u ~ 1 - k/16 * u + (k^2/256 - 1/3) * u^2 +
 //                                    + (k/16 - (k/16)^3) * u^3 + O(u^4)
-LIBC_INLINE static float atanf_eval(float u, float k_over_16) {
+LIBC_INLINE float atanf_eval(float u, float k_over_16) {
   // (k/16)^2
   float c2 = k_over_16 * k_over_16;
   // -(k/16)^3
-  float c3 = fputil::multiply_add(-k_over_16, c2, k_over_16);
+  float c3 = fputil::sub_multiply(k_over_16, k_over_16, c2);
   float u2 = u * u;
   // (k^2/256 - 1/3) + u * (k/16 - (k/16)^3)
   float a0 = fputil::multiply_add(c3, u, c2 - 0x1.555556p-2f);
   // -k/16 + u*(k^2/256 - 1/3) + u^2 * (k/16 - (k/16)^3)
-  float a1 = fputil::multiply_add(u, a0, -k_over_16);
+  float a1 = fputil::multiply_sub(u, a0, k_over_16);
   // u - u^2 * k/16 + u^3 * ((k^2/256 - 1/3) + u^4 * (k/16 - (k/16)^3))
   return fputil::multiply_add(u2, a1, u);
 }
@@ -85,7 +85,7 @@ LIBC_INLINE static float atanf_eval(float u, float k_over_16) {
 // There are several range reduction steps we can take for atan2(y, x) as
 // follow:
 
-LIBC_INLINE static float atanf(float x) {
+LIBC_INLINE float atanf(float x) {
   using namespace atanf_internal;
   using FPBits = typename fputil::FPBits<float>;
   using FPBits = typename fputil::FPBits<float>;
@@ -115,7 +115,7 @@ LIBC_INLINE static float atanf(float x) {
     // atan(x) = sign(x) * pi/2 - atan(1/x)
     //         ~ sign(x) * pi/2 - 1/x
     if (LIBC_UNLIKELY(x_abs >= 0x4200'0000))
-      return fputil::multiply_add(sign, PI_OVER_2.hi, -1.0f / x);
+      return fputil::multiply_sub(sign, PI_OVER_2.hi, 1.0f / x);
     // x <= 2^-11:
     // atan(x) ~ x
     return x;

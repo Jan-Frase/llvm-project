@@ -27,8 +27,7 @@ llvm::Expected<WriteMemoryResponseBody>
 WriteMemoryRequestHandler::Run(const WriteMemoryArguments &args) const {
   const lldb::addr_t address = args.memoryReference + args.offset;
 
-  lldb::SBProcess process = dap.target.GetProcess();
-  if (!lldb::SBDebugger::StateIsStoppedState(process.GetState()))
+  if (dap.ProcessIsNotStopped())
     return llvm::make_error<NotStoppedError>();
 
   if (args.data.empty()) {
@@ -43,8 +42,7 @@ WriteMemoryRequestHandler::Run(const WriteMemoryArguments &args) const {
   auto decode_error = llvm::decodeBase64(args.data, output);
 
   if (decode_error) {
-    return llvm::make_error<DAPError>(
-        llvm::toString(std::move(decode_error)).c_str());
+    return llvm::make_error<DAPError>(llvm::toString(std::move(decode_error)));
   }
 
   lldb::SBError write_error;

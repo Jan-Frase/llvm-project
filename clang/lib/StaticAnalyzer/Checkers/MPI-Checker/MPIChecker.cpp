@@ -58,10 +58,11 @@ void MPIChecker::checkDoubleNonblocking(const CallEvent &PreCallEvent,
   // double nonblocking detected
   if (OldReq && OldReq->RqstState == Request::RequestState::Nonblocking) {
     ExplodedNode *ErrorNode = Ctx.generateNonFatalErrorNode();
-    BReporter.reportDoubleNonblocking(PreCallEvent, *OldReq, RequestRegion, ErrorNode,
+
+    if (!ErrorNode)
+      return;
+    BReporter.reportDoubleNonblocking(PreCallEvent, *Req, MR, ErrorNode,
                                       Ctx.getBugReporter());
-    Ctx.addTransition(ErrorNode->getState(), ErrorNode);
-    return;
   }
 
   // no error
@@ -149,10 +150,10 @@ void MPIChecker::checkUnmatchedWaits(const CallEvent &PreCallEvent,
     const Request *const Req = State->get<RequestMap>(ReqRegion);
     State = State->set<RequestMap>(ReqRegion, Request(Request::Wait));
     if (!Req) {
-      if (!ErrorNode) {
+      if (!ErrorNode)
         ErrorNode = Ctx.generateNonFatalErrorNode(State);
-        State = ErrorNode->getState();
-      }
+      if (!ErrorNode)
+        continue;
       // A wait has no matching nonblocking call.
       BReporter.reportUnmatchedWait(PreCallEvent, ReqRegion, ErrorNode,
                                     Ctx.getBugReporter());
@@ -185,7 +186,8 @@ void MPIChecker::checkMissingWaits(SymbolReaper &SymReaper,
           State = ErrorNode->getState();
         }
         BReporter.reportMissingWait(Req, ReqRegion, ErrorNode,
-                                    Ctx.getBugReporter());
+
+        Ctx.getBugReporter());
       }
       State = State->remove<RequestMap>(ReqRegion);
     }

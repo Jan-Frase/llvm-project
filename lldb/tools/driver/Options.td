@@ -5,7 +5,7 @@ class S<string name> : Separate<["--", "-"], name>;
 class R<list<string> prefixes, string name>
     : Option<prefixes, name, KIND_REMAINING_ARGS>;
 
-// Please keep this in sync with the man page in docs/man/lldb.rst
+// Please keep this in sync with the man page in docs/man/lldb.md
 
 // Attaching options.
 def grp_attach : OptionGroup<"attaching">, HelpText<"ATTACHING">;
@@ -239,10 +239,5 @@ def arch : Separate<["--", "-"], "arch">,
            HelpText<"Tells the debugger to use the specified architecture when "
                     "starting and running the program.">;
 def : Separate<["-"], "a">, Alias<arch>, HelpText<"Alias for --arch">;
-
-def debug : F<"debug">,
-            HelpText<"Tells the debugger to print out extra information for "
-                     "debugging itself.">;
-def : Flag<["-"], "d">, Alias<debug>, HelpText<"Alias for --debug">;
 
 def REM : R<["--"], "">;

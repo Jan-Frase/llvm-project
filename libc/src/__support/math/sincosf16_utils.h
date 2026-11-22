@@ -6,15 +6,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIBC_SRC_MATH_GENERIC_SINCOSF16_UTILS_H
-#define LLVM_LIBC_SRC_MATH_GENERIC_SINCOSF16_UTILS_H
+#ifndef LLVM_LIBC_SRC___SUPPORT_MATH_SINCOSF16_UTILS_H
+#define LLVM_LIBC_SRC___SUPPORT_MATH_SINCOSF16_UTILS_H
 
-#include "src/__support/FPUtil/PolyEval.h"
 #include "src/__support/FPUtil/nearest_integer.h"
+#include "src/__support/FPUtil/polyeval.h"
 #include "src/__support/common.h"
 #include "src/__support/macros/config.h"
 
 namespace LIBC_NAMESPACE_DECL {
+
+namespace math {
 
 namespace sincosf16_internal {
 
@@ -22,7 +24,7 @@ namespace sincosf16_internal {
 // Table is generated with Sollya as follows:
 // > display = hexadecimmal;
 // > for k from 0 to 63 do { round(sin(k * pi/32), SG, RN); };
-constexpr float SIN_K_PI_OVER_32[64] = {
+LIBC_INLINE_VAR constexpr float SIN_K_PI_OVER_32[64] = {
     0x0.0p0,        0x1.917a6cp-4,  0x1.8f8b84p-3,  0x1.294062p-2,
     0x1.87de2ap-2,  0x1.e2b5d4p-2,  0x1.1c73b4p-1,  0x1.44cf32p-1,
     0x1.6a09e6p-1,  0x1.8bc806p-1,  0x1.a9b662p-1,  0x1.c38b3p-1,
@@ -42,7 +44,7 @@ constexpr float SIN_K_PI_OVER_32[64] = {
 
 LIBC_INLINE int32_t range_reduction_sincospif16(float x, float &y) {
   float kf = fputil::nearest_integer(x * 32);
-  y = fputil::multiply_add(x, 32.0f, -kf);
+  y = fputil::multiply_sub(x, 32.0f, kf);
 
   return static_cast<int32_t>(kf);
 }
@@ -68,9 +70,9 @@ LIBC_INLINE int32_t range_reduction_sincosf16(float x, float &y) {
   return static_cast<int32_t>(kd);
 }
 
-LIBC_INLINE static void sincosf16_poly_eval(int32_t k, float y, float &sin_k,
-                                            float &cos_k, float &sin_y,
-                                            float &cosm1_y) {
+LIBC_INLINE void sincosf16_poly_eval(int32_t k, float y, float &sin_k,
+                                     float &cos_k, float &sin_y,
+                                     float &cosm1_y) {
 
   sin_k = SIN_K_PI_OVER_32[k & 63];
   cos_k = SIN_K_PI_OVER_32[(k + 16) & 63];
@@ -111,6 +113,8 @@ LIBC_INLINE void sincospif16_eval(float xf, float &sin_k, float &cos_k,
 
 } // namespace sincosf16_internal
 
+} // namespace math
+
 } // namespace LIBC_NAMESPACE_DECL
 
-#endif // LLVM_LIBC_SRC_MATH_GENERIC_SINCOSF16_UTILS_H
+#endif // LLVM_LIBC_SRC___SUPPORT_MATH_SINCOSF16_UTILS_H

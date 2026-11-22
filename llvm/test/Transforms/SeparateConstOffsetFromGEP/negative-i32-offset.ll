@@ -18,8 +18,7 @@ define ptr @test(ptr %p, i32 %a) {
 define ptr @test_overflow(ptr %p, i32 %a) {
 ; CHECK-LABEL: define ptr @test_overflow(
 ; CHECK-SAME: ptr [[P:%.*]], i32 [[A:%.*]]) {
-; CHECK-NEXT:    [[ADD22:%.*]] = add i32 [[A]], -2147483648
-; CHECK-NEXT:    [[TMP1:%.*]] = shl i32 [[ADD22]], 2
+; CHECK-NEXT:    [[TMP1:%.*]] = shl i32 [[A]], 2
 ; CHECK-NEXT:    [[UGLYGEP:%.*]] = getelementptr i8, ptr [[P]], i32 [[TMP1]]
 ; CHECK-NEXT:    ret ptr [[UGLYGEP]]
 ;
@@ -32,9 +31,8 @@ define ptr @test_overflow(ptr %p, i32 %a) {
 define ptr @test_xor_overflow(ptr %p, i32 range(i32 0, -2147483648) %a) {
 ; CHECK-LABEL: define ptr @test_xor_overflow(
 ; CHECK-SAME: ptr [[P:%.*]], i32 range(i32 0, -2147483648) [[A:%.*]]) {
-; CHECK-NEXT:    [[XOR1:%.*]] = xor i32 [[A]], 2147483647
-; CHECK-NEXT:    [[TMP1:%.*]] = shl i32 [[XOR1]], 2
-; CHECK-NEXT:    [[UGLYGEP:%.*]] = getelementptr i8, ptr [[P]], i32 [[TMP1]]
+; CHECK-NEXT:    [[XOR:%.*]] = xor i32 [[A]], -1
+; CHECK-NEXT:    [[UGLYGEP:%.*]] = getelementptr inbounds i32, ptr [[P]], i32 [[XOR]]
 ; CHECK-NEXT:    ret ptr [[UGLYGEP]]
 ;
   %xor = xor i32 %a, -1

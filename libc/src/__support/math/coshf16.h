@@ -13,19 +13,18 @@
 
 #ifdef LIBC_TYPES_HAS_FLOAT16
 
-#include "expxf16_utils.h"
 #include "src/__support/FPUtil/FEnvImpl.h"
 #include "src/__support/FPUtil/FPBits.h"
 #include "src/__support/FPUtil/except_value_utils.h"
-#include "src/__support/FPUtil/rounding_mode.h"
 #include "src/__support/macros/config.h"
 #include "src/__support/macros/optimization.h"
+#include "src/__support/math/expxf16_utils.h"
 
 namespace LIBC_NAMESPACE_DECL {
 
 namespace math {
 
-LIBC_INLINE static constexpr float16 coshf16(float16 x) {
+LIBC_INLINE constexpr float16 coshf16(float16 x) {
 
 #ifndef LIBC_MATH_HAS_SKIP_ACCURATE_PASS
   constexpr fputil::ExceptValues<float16, 9> COSHF16_EXCEPTS_POS = {{
@@ -90,15 +89,7 @@ LIBC_INLINE static constexpr float16 coshf16(float16 x) {
       if (x_bits.is_inf())
         return FPBits::inf().get_val();
 
-      switch (fputil::quick_get_round()) {
-      case FE_TONEAREST:
-      case FE_UPWARD:
-        fputil::set_errno_if_required(ERANGE);
-        fputil::raise_except_if_required(FE_OVERFLOW | FE_INEXACT);
-        return FPBits::inf().get_val();
-      default:
-        return FPBits::max_normal().get_val();
-      }
+      return fputil::set_overflow<float16>();
     }
   }
 

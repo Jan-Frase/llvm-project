@@ -204,11 +204,11 @@ FunctionCallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
 }
 
 CallInterfaceCallable FunctionCallOp::getCallableForCallee() {
-  return (*this)->getAttrOfType<SymbolRefAttr>(getCalleeAttrName());
+  return getCalleeAttr();
 }
 
 void FunctionCallOp::setCalleeFromCallable(CallInterfaceCallable callee) {
-  (*this)->setAttr(getCalleeAttrName(), cast<SymbolRefAttr>(callee));
+  setCalleeAttr(cast<FlatSymbolRefAttr>(cast<SymbolRefAttr>(callee)));
 }
 
 Operation::operand_range FunctionCallOp::getArgOperands() {
@@ -266,12 +266,14 @@ LogicalResult SwitchOp::verify() {
   if (!literals && targets.empty())
     return success();
 
-  Type selectorType = getSelector().getType();
-  Type literalType = literals->getType().getElementType();
-  if (literalType != selectorType)
-    return emitOpError() << "'selector' type (" << selectorType
-                         << ") should match literals type (" << literalType
-                         << ")";
+  if (literals) {
+    Type selectorType = getSelector().getType();
+    Type literalType = literals->getType().getElementType();
+    if (literalType != selectorType)
+      return emitOpError() << "'selector' type (" << selectorType
+                           << ") should match literals type (" << literalType
+                           << ")";
+  }
 
   if (literals && literals->size() != static_cast<int64_t>(targets.size()))
     return emitOpError() << "number of literals (" << literals->size()
@@ -301,6 +303,23 @@ Block *SwitchOp::getSuccessorForOperands(ArrayRef<Attribute> operands) {
   }
   return nullptr;
 }
+
+//===----------------------------------------------------------------------===//
+// spirv.LifetimeStart / spirv.LifetimeStop
+//===----------------------------------------------------------------------===//
+
+template <typename LifetimeOpTy>
+static LogicalResult verifyLifetimeOp(LifetimeOpTy op) {
+  auto ptrType = cast<spirv::PointerType>(op.getPointer().getType());
+  if (ptrType.getStorageClass() != spirv::StorageClass::Function)
+    return op.emitOpError("pointer must have the Function storage class");
+
+  return success();
+}
+
+LogicalResult LifetimeStartOp::verify() { return verifyLifetimeOp(*this); }
+
+LogicalResult LifetimeStopOp::verify() { return verifyLifetimeOp(*this); }
 
 //===----------------------------------------------------------------------===//
 // spirv.mlir.loop
@@ -358,6 +377,14 @@ static bool hasOtherMerge(Region &region) {
   return !region.empty() && llvm::any_of(region.getOps(), [&](Operation &op) {
     return isa<spirv::MergeOp>(op) && op.getBlock() != &region.back();
   });
+}
+
+/// Returns true if types yielded by `spirv.mlir.merge` in the region match
+/// those returned by the `op`.
+static bool returnTypesMatch(Region &region, Operation *op) {
+  auto mergeOps = region.getOps<spirv::MergeOp>();
+  Operation *mergeOp = llvm::getSingleElement(mergeOps);
+  return llvm::equal(mergeOp->getOperandTypes(), op->getResultTypes());
 }
 
 LogicalResult LoopOp::verifyRegions() {
@@ -444,6 +471,10 @@ LogicalResult LoopOp::verifyRegions() {
       }
     }
   }
+
+  if (!returnTypesMatch(region, op))
+    return emitOpError(
+        "result types do not match types yielded with `spirv.mlir.merge`");
 
   return success();
 }
@@ -608,6 +639,10 @@ LogicalResult SelectionOp::verifyRegions() {
 
   if (region.hasOneBlock())
     return emitOpError("must have a selection header block");
+
+  if (!returnTypesMatch(region, op))
+    return emitOpError(
+        "result types do not match types yielded with `spirv.mlir.merge`");
 
   return success();
 }

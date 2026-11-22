@@ -1,4 +1,4 @@
-; RUN: llc -mtriple=amdgcn--amdpal -mcpu=gfx1200 <%s | FileCheck %s
+; RUN: llc -mtriple=amdgpu12.00--amdpal <%s | FileCheck %s
 
 ; CHECK-LABEL: {{^}}_amdgpu_cs_main:
 ; CHECK: ; TotalNumSgprs: 34
@@ -52,6 +52,7 @@
 ; CHECK-NEXT:        .sample_coverage_ena: false
 ; CHECK-NEXT:    .hardware_stages:
 ; CHECK-NEXT:      .cs:
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .checksum_value: 0x9444d7d0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .dynamic_vgpr_saved_count: 0x70
@@ -111,6 +112,7 @@
 ; CHECK-NEXT:        .wavefront_size: 0x40
 ; CHECK-NEXT:        .wgp_mode:       false
 ; CHECK-NEXT:      .gs:
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_gs
 ; CHECK-NEXT:        .entry_point_symbol:    gs_shader
@@ -123,6 +125,7 @@
 ; CHECK-NEXT:        .vgpr_count:     0x1
 ; CHECK-NEXT:        .wgp_mode:       true
 ; CHECK-NEXT:      .hs:
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_hs
 ; CHECK-NEXT:        .entry_point_symbol:    hs_shader
@@ -135,6 +138,7 @@
 ; CHECK-NEXT:        .vgpr_count:     0x1
 ; CHECK-NEXT:        .wgp_mode:       true
 ; CHECK-NEXT:      .ps:
+; CHECK-NEXT:        .backend_stack_size: 0
 ; CHECK-NEXT:        .debug_mode:     false
 ; CHECK-NEXT:        .entry_point:    _amdgpu_ps
 ; CHECK-NEXT:        .entry_point_symbol:    ps_shader
@@ -201,7 +205,7 @@ declare i64 @llvm.amdgcn.s.getpc() #2
 ; Function Attrs: nocallback nofree nosync nounwind willreturn memory(write)
 declare void @llvm.amdgcn.raw.buffer.store.i32(i32, <4 x i32>, i32, i32, i32 immarg) #3
 
-attributes #0 = { nounwind memory(readwrite) "amdgpu-flat-work-group-size"="1024,1024" "amdgpu-memory-bound"="false" "amdgpu-unroll-threshold"="700" "amdgpu-wave-limiter"="false" "amdgpu-work-group-info-arg-no"="4" "denormal-fp-math-f32"="preserve-sign" "target-features"="+wavefrontsize64,+cumode" "amdgpu-dynamic-vgpr-block-size"="16" }
+attributes #0 = { nounwind memory(readwrite) "amdgpu-flat-work-group-size"="1024,1024" "amdgpu-memory-bound"="false" "amdgpu-unroll-threshold"="700" "amdgpu-wave-limiter"="false" "amdgpu-work-group-info-arg-no"="4" denormal_fpenv(float: preservesign) "target-features"="+wavefrontsize64,+cumode" "amdgpu-dynamic-vgpr-block-size"="16" }
 
 attributes #1 = { nounwind memory(readwrite) "InitialPSInputAddr"="36983" }
 

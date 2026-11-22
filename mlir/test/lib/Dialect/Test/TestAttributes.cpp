@@ -15,15 +15,12 @@
 #include "TestDialect.h"
 #include "TestTypes.h"
 #include "mlir/IR/Attributes.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/ExtensibleDialect.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/Types.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/bit.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -277,7 +274,7 @@ struct mlir::FieldParser<test::CopyCount> {
   }
 };
 namespace test {
-llvm::hash_code hash_value(const test::CopyCount &copyCount) {
+static llvm::hash_code hash_value(const test::CopyCount &copyCount) {
   return llvm::hash_value(copyCount.value);
 }
 } // namespace test
